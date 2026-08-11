@@ -5,21 +5,30 @@ from collections.abc import Awaitable, Callable
 import structlog
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp
 
 logger = structlog.get_logger("http_request")
 
 
-class LoggingAndCorrelationIdMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: ASGIApp) -> None:
-        super().__init__(app)
+def _is_valid_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+        return True
+    except ValueError:
+        return False
 
+
+class LoggingAndCorrelationIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         structlog.contextvars.clear_contextvars()
 
-        correlation_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        incoming_id = request.headers.get("X-Request-ID")
+        correlation_id = (
+            incoming_id
+            if incoming_id and _is_valid_uuid(incoming_id)
+            else str(uuid.uuid4())
+        )
 
         structlog.contextvars.bind_contextvars(
             correlation_id=correlation_id,
@@ -45,12 +54,8 @@ class LoggingAndCorrelationIdMiddleware(BaseHTTPMiddleware):
             response.headers["X-Request-ID"] = correlation_id
             return response
 
-        except Exception as exc:
+        except Exception:
             process_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
-            logger.exception(
-                "request_failed",
-                duration_ms=process_time_ms,
-                error=str(exc),
-            )
+            logger.exception("request_failed", duration_ms=process_time_ms)
             raise

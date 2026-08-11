@@ -14,6 +14,14 @@ from src.tools.exceptions import (
 
 logger = structlog.get_logger(__name__)
 
+MAX_OUTPUT_CHARS = 4000
+
+
+def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"... [truncated {len(text) - limit} chars]"
+
 
 class FileSystemTool:
     """Defensive file system wrapper restricted to a sandbox root directory."""
@@ -44,7 +52,7 @@ class FileSystemTool:
             raise PathTraversalError(
                 message=f"Access denied: path '{relative_path}' is outside sandbox root.",
                 tool_name="FileSystemTool",
-                details={"requested_path": str(relative_path)},
+                attempted_path=str(target_path),
             )
         return target_path
 
@@ -162,6 +170,7 @@ class ShellTool:
             raise ExecutionTimeoutError(
                 message=f"Command '{executable}' timed out after {self.timeout_seconds}s.",
                 tool_name="ShellTool",
+                timeout_seconds=self.timeout_seconds,
                 details={"executable": executable, "args": cmd_args},
             ) from exc
         except FileNotFoundError as exc:
@@ -177,21 +186,27 @@ class ShellTool:
                 details={"executable": executable, "args": cmd_args},
             ) from exc
 
-        stdout = stdout_bytes.decode("utf-8", errors="replace").strip()
-        stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
+        stdout = _truncate(stdout_bytes.decode("utf-8", errors="replace").strip())
+        stderr = _truncate(stderr_bytes.decode("utf-8", errors="replace").strip())
 
-        if process.returncode != 0:
-            raise CommandExecutionError(
-                message=f"Command failed with exit code {process.returncode}",
+        return_code = process.returncode
+        if return_code is None:
+            raise ToolError(
+                message=f"Process '{executable}' exited without a return code.",
                 tool_name="ShellTool",
-                details={
-                    "exit_code": process.returncode,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                },
+                details={"executable": executable, "args": cmd_args},
             )
 
-        return {"exit_code": 0, "stdout": stdout, "stderr": stderr}
+        if return_code != 0:
+            raise CommandExecutionError(
+                message=f"Command failed with exit code {return_code}",
+                tool_name="ShellTool",
+                exit_code=process.returncode or -1,
+                stderr=stderr,
+                details={"stdout": stdout},
+            )
+
+        return {"exit_code": return_code, "stdout": stdout, "stderr": stderr}
 
     async def execute(
         self, executable: str, args: Sequence[str]

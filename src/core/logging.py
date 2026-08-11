@@ -27,16 +27,15 @@ def setup_logging() -> None:
     else:
         renderer = structlog.dev.ConsoleRenderer()
 
-        log_level = logging.DEBUG if settings.debug else logging.INFO
-        structlog.configure(
-            processors=shared_processors
-            + [
-                structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
-            ],
-            logger_factory=structlog.stdlib.LoggerFactory(),
-            wrapper_class=structlog.make_filtering_bound_logger(log_level),
-            cache_logger_on_first_use=False,
-        )
+    log_level = logging.DEBUG if settings.debug else logging.INFO
+
+    structlog.configure(
+        processors=shared_processors
+        + [structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.make_filtering_bound_logger(log_level),
+        cache_logger_on_first_use=True,
+    )
 
     formatter = structlog.stdlib.ProcessorFormatter(
         foreign_pre_chain=shared_processors,
@@ -51,9 +50,9 @@ def setup_logging() -> None:
 
     root_logger = logging.getLogger()
     root_logger.handlers = [handler]
-    root_logger.setLevel(logging.INFO if not settings.debug else logging.DEBUG)
+    root_logger.setLevel(log_level)
 
 
-def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
+def get_logger(name: str | None = None) -> structlog.typing.FilteringBoundLogger:
     """Returns a structured logger instance."""
-    return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))
+    return cast(structlog.typing.FilteringBoundLogger, structlog.get_logger(name))
