@@ -1,3 +1,4 @@
+import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -7,11 +8,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _find_root(marker: str = "pyproject.toml") -> Path:
+    env_root = os.environ.get("APP_ROOT")
+    if env_root:
+        return Path(env_root).resolve()
+
     current = Path(__file__).resolve()
     for parent in current.parents:
         if (parent / marker).exists():
             return parent
-    raise RuntimeError(f"Could not find project root (missing {marker})")
+
+    # Fallback to standard package root depth relative to config.py if marker file is missing (e.g. slim Docker images)
+    return current.parents[2] if len(current.parents) > 2 else current.parent
 
 
 ROOT_DIR = _find_root()

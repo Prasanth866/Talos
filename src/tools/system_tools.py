@@ -95,6 +95,14 @@ class FileSystemTool:
                 details={"path": str(relative_path)},
             ) from exc
 
+    async def async_read_file(self, relative_path: str | Path) -> str:
+        """Asynchronously reads file contents offloading disk I/O to a worker thread."""
+        return await asyncio.to_thread(self.read_file, relative_path)
+
+    async def async_write_file(self, relative_path: str | Path, content: str) -> None:
+        """Asynchronously writes content to a file offloading disk I/O to a worker thread."""
+        await asyncio.to_thread(self.write_file, relative_path, content)
+
 
 class ShellTool:
     """Defensive shell command executor with timeouts and strict execution boundaries."""
@@ -225,6 +233,20 @@ def write_file(sandbox_dir: Path, relative_path: str | Path, content: str) -> No
     """Convenience function to write a file within a sandbox directory."""
     tool = FileSystemTool(sandbox_dir=sandbox_dir)
     tool.write_file(relative_path, content)
+
+
+async def async_read_file(sandbox_dir: Path, relative_path: str | Path) -> str:
+    """Convenience async function to read a file within a sandbox directory."""
+    tool = FileSystemTool(sandbox_dir=sandbox_dir)
+    return await tool.async_read_file(relative_path)
+
+
+async def async_write_file(
+    sandbox_dir: Path, relative_path: str | Path, content: str
+) -> None:
+    """Convenience async function to write a file within a sandbox directory."""
+    tool = FileSystemTool(sandbox_dir=sandbox_dir)
+    await tool.async_write_file(relative_path, content)
 
 
 async def run_shell(

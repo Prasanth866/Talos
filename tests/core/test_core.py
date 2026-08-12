@@ -1,10 +1,11 @@
 import uuid
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from src.core.config import Environment, Settings, get_settings
+from src.core.config import Environment, Settings, _find_root, get_settings
 from src.core.logging import get_logger, setup_logging
 from src.core.middleware import LoggingAndCorrelationIdMiddleware
 from src.main import app
@@ -114,3 +115,17 @@ def test_fastapi_app_lifespan_integration() -> None:
     """Verifies the main FastAPI app builds and handles lifespan events."""
     with TestClient(app) as client:
         assert client is not None
+
+
+def test_find_root_with_app_root_override(tmp_path: Path) -> None:
+    """Verifies _find_root respects APP_ROOT environment variable."""
+    with patch.dict("os.environ", {"APP_ROOT": str(tmp_path)}):
+        root = _find_root()
+        assert root == tmp_path.resolve()
+
+
+def test_find_root_fallback_when_marker_missing() -> None:
+    """Verifies _find_root falls back gracefully when marker is absent."""
+    with patch.dict("os.environ", {}, clear=True):
+        root = _find_root(marker="non_existent_marker_file_12345.xyz")
+        assert root.exists()

@@ -14,6 +14,8 @@ from src.tools.system_tools import (
     FileSystemTool,
     ShellTool,
     _truncate,
+    async_read_file,
+    async_write_file,
     read_file,
     run_shell,
     write_file,
@@ -209,3 +211,20 @@ async def test_empty_shell_command_raises_tool_error(tmp_path: Path) -> None:
         await shell.run_shell("   ")
 
     assert "Command string cannot be empty" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_async_file_write_and_read(tmp_path: Path) -> None:
+    """Verifies async methods and helpers offload I/O safely."""
+    fs = FileSystemTool(sandbox_dir=tmp_path)
+    file_path = "async_test/file.txt"
+    content = "Async defensive file content"
+
+    await fs.async_write_file(file_path, content)
+    result = await fs.async_read_file(file_path)
+    assert result == content
+
+    helper_file = "async_test/helper.txt"
+    await async_write_file(tmp_path, helper_file, "Helper async content")
+    helper_result = await async_read_file(tmp_path, helper_file)
+    assert helper_result == "Helper async content"
