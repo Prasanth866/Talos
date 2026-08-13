@@ -14,10 +14,14 @@ from src.tools.system_tools import (
     FileSystemTool,
     ShellTool,
     _truncate,
+    async_read_bytes,
     async_read_file,
+    async_write_bytes,
     async_write_file,
+    read_bytes,
     read_file,
     run_shell,
+    write_bytes,
     write_file,
 )
 
@@ -228,3 +232,85 @@ async def test_async_file_write_and_read(tmp_path: Path) -> None:
     await async_write_file(tmp_path, helper_file, "Helper async content")
     helper_result = await async_read_file(tmp_path, helper_file)
     assert helper_result == "Helper async content"
+
+
+def test_binary_file_write_and_read(tmp_path: Path) -> None:
+    """Verifies binary file writing and reading without UnicodeDecodeError."""
+    fs = FileSystemTool(sandbox_dir=tmp_path)
+    file_path = "binary/test.bin"
+    raw_bytes = b"\x80\x81\xff\xfe\x00\x01\x02\x03\xde\xad\xbe\xef"
+
+    fs.write_bytes(file_path, raw_bytes)
+    result_bytes = fs.read_bytes(file_path)
+    assert result_bytes == raw_bytes
+
+    # Test via binary flag in read_file and write_file
+    flag_file = "binary/flag_test.bin"
+    fs.write_file(flag_file, raw_bytes, binary=True)
+    assert fs.read_file(flag_file, binary=True) == raw_bytes
+
+    # Test standalone helper functions
+    helper_file = "binary/helper.bin"
+    write_bytes(tmp_path, helper_file, raw_bytes)
+    assert read_bytes(tmp_path, helper_file) == raw_bytes
+    assert read_file(tmp_path, helper_file, binary=True) == raw_bytes
+
+
+@pytest.mark.asyncio
+async def test_async_binary_file_operations(tmp_path: Path) -> None:
+    """Verifies async binary read and write operations."""
+    fs = FileSystemTool(sandbox_dir=tmp_path)
+    file_path = "async_binary/data.bin"
+    raw_bytes = b"\x00\xff\xfe\xfd\x80\x90"
+
+    await fs.async_write_bytes(file_path, raw_bytes)
+    result = await fs.async_read_bytes(file_path)
+    assert result == raw_bytes
+
+    # Async helper functions
+    helper_file = "async_binary/helper.bin"
+    await async_write_bytes(tmp_path, helper_file, raw_bytes)
+    helper_res = await async_read_bytes(tmp_path, helper_file)
+    assert helper_res == raw_bytes
+
+
+@pytest.mark.asyncio
+async def test_read_file_overload_signatures(tmp_path: Path) -> None:
+    """Verifies read_file and async_read_file overloads work with string and binary modes."""
+    fs = FileSystemTool(sandbox_dir=tmp_path)
+    file_path = "overload_test.txt"
+    fs.write_file(file_path, "overload text")
+
+    # Method calls with literal False, literal True, and dynamic bool
+    str_res: str = fs.read_file(file_path, binary=False)
+    assert isinstance(str_res, str)
+
+    default_str_res: str = fs.read_file(file_path)
+    assert isinstance(default_str_res, str)
+
+    bin_res: bytes = fs.read_file(file_path, binary=True)
+    assert isinstance(bin_res, bytes)
+
+    dynamic_flag: bool = True
+    union_res: str | bytes = fs.read_file(file_path, binary=dynamic_flag)
+    assert isinstance(union_res, bytes)
+
+    # Async method calls
+    async_str: str = await fs.async_read_file(file_path, binary=False)
+    assert isinstance(async_str, str)
+
+    async_bin: bytes = await fs.async_read_file(file_path, binary=True)
+    assert isinstance(async_bin, bytes)
+
+    # Helper function calls
+    helper_str: str = read_file(tmp_path, file_path, binary=False)
+    assert isinstance(helper_str, str)
+
+    helper_bin: bytes = read_file(tmp_path, file_path, binary=True)
+    assert isinstance(helper_bin, bytes)
+
+    async_helper_str: str = await async_read_file(tmp_path, file_path, binary=False)
+    assert isinstance(async_helper_str, str)
+
+    async_helper_bin: bytes = await async_read_file(tmp_path, file_path, binary=True)
+    assert isinstance(async_helper_bin, bytes)

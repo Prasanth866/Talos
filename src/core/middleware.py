@@ -57,5 +57,5 @@ class LoggingAndCorrelationIdMiddleware(BaseHTTPMiddleware):
         except Exception:
             process_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
-            logger.exception("request_failed", duration_ms=process_time_ms)
+            logger.error("request_failed", duration_ms=process_time_ms)
             raise

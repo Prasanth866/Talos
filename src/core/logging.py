@@ -1,5 +1,6 @@
 import logging
 import sys
+from contextlib import suppress
 from typing import cast
 
 import structlog
@@ -44,6 +45,10 @@ def setup_logging() -> None:
             renderer,
         ],
     )
+
+    if hasattr(sys.stdout, "reconfigure"):
+        with suppress(Exception):
+            sys.stdout.reconfigure(line_buffering=True)
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)

@@ -2,6 +2,7 @@ import asyncio
 import shlex
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal, overload
 
 import structlog
 
@@ -56,8 +57,21 @@ class FileSystemTool:
             )
         return target_path
 
-    def read_file(self, relative_path: str | Path) -> str:
+    @overload
+    def read_file(
+        self, relative_path: str | Path, binary: Literal[False] = False
+    ) -> str: ...
+
+    @overload
+    def read_file(self, relative_path: str | Path, binary: Literal[True]) -> bytes: ...
+
+    @overload
+    def read_file(self, relative_path: str | Path, binary: bool) -> str | bytes: ...
+
+    def read_file(self, relative_path: str | Path, binary: bool = False) -> str | bytes:
         """Reads file contents from the sandbox directory."""
+        if binary:
+            return self.read_bytes(relative_path)
         safe_path = self._resolve_safe_path(relative_path)
         if not safe_path.exists():
             raise ToolError(
@@ -80,8 +94,43 @@ class FileSystemTool:
                 details={"path": str(relative_path)},
             ) from exc
 
-    def write_file(self, relative_path: str | Path, content: str) -> None:
+    def read_bytes(self, relative_path: str | Path) -> bytes:
+        """Reads raw binary content from a file in the sandbox directory."""
+        safe_path = self._resolve_safe_path(relative_path)
+        if not safe_path.exists():
+            raise ToolError(
+                message=f"File not found: '{relative_path}'",
+                tool_name="FileSystemTool",
+                details={"path": str(relative_path)},
+            )
+        if safe_path.is_dir():
+            raise ToolError(
+                message=f"Path '{relative_path}' is a directory, not a file.",
+                tool_name="FileSystemTool",
+                details={"path": str(relative_path)},
+            )
+        try:
+            return safe_path.read_bytes()
+        except Exception as exc:
+            raise ToolError(
+                message=f"Failed to read file: {exc}",
+                tool_name="FileSystemTool",
+                details={"path": str(relative_path)},
+            ) from exc
+
+    def write_file(
+        self,
+        relative_path: str | Path,
+        content: str | bytes,
+        binary: bool = False,
+    ) -> None:
         """Writes content to a file inside the sandbox directory."""
+        if binary or isinstance(content, bytes):
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            self.write_bytes(relative_path, content)
+            return
+
         safe_path = self._resolve_safe_path(relative_path)
         try:
             safe_path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,13 +144,60 @@ class FileSystemTool:
                 details={"path": str(relative_path)},
             ) from exc
 
-    async def async_read_file(self, relative_path: str | Path) -> str:
-        """Asynchronously reads file contents offloading disk I/O to a worker thread."""
-        return await asyncio.to_thread(self.read_file, relative_path)
+    def write_bytes(self, relative_path: str | Path, content: bytes) -> None:
+        """Writes raw binary content to a file inside the sandbox directory."""
+        safe_path = self._resolve_safe_path(relative_path)
+        try:
+            safe_path.parent.mkdir(parents=True, exist_ok=True)
+            safe_path.write_bytes(content)
+        except ToolError:
+            raise
+        except Exception as exc:
+            raise ToolError(
+                message=f"Failed to write file: {exc}",
+                tool_name="FileSystemTool",
+                details={"path": str(relative_path)},
+            ) from exc
 
-    async def async_write_file(self, relative_path: str | Path, content: str) -> None:
+    @overload
+    async def async_read_file(
+        self, relative_path: str | Path, binary: Literal[False] = False
+    ) -> str: ...
+
+    @overload
+    async def async_read_file(
+        self, relative_path: str | Path, binary: Literal[True]
+    ) -> bytes: ...
+
+    @overload
+    async def async_read_file(
+        self, relative_path: str | Path, binary: bool
+    ) -> str | bytes: ...
+
+    async def async_read_file(
+        self, relative_path: str | Path, binary: bool = False
+    ) -> str | bytes:
+        """Asynchronously reads file contents offloading disk I/O to a worker thread."""
+        return await asyncio.to_thread(self.read_file, relative_path, binary)
+
+    async def async_read_bytes(self, relative_path: str | Path) -> bytes:
+        """Asynchronously reads binary file contents offloading disk I/O to a worker thread."""
+        return await asyncio.to_thread(self.read_bytes, relative_path)
+
+    async def async_write_file(
+        self,
+        relative_path: str | Path,
+        content: str | bytes,
+        binary: bool = False,
+    ) -> None:
         """Asynchronously writes content to a file offloading disk I/O to a worker thread."""
-        await asyncio.to_thread(self.write_file, relative_path, content)
+        await asyncio.to_thread(self.write_file, relative_path, content, binary)
+
+    async def async_write_bytes(
+        self, relative_path: str | Path, content: bytes
+    ) -> None:
+        """Asynchronously writes binary content to a file offloading disk I/O to a worker thread."""
+        await asyncio.to_thread(self.write_bytes, relative_path, content)
 
 
 class ShellTool:
@@ -223,30 +319,104 @@ class ShellTool:
         return await self.run_shell(executable, args)
 
 
-def read_file(sandbox_dir: Path, relative_path: str | Path) -> str:
+@overload
+def read_file(
+    sandbox_dir: Path, relative_path: str | Path, binary: Literal[False] = False
+) -> str: ...
+
+
+@overload
+def read_file(
+    sandbox_dir: Path, relative_path: str | Path, binary: Literal[True]
+) -> bytes: ...
+
+
+@overload
+def read_file(
+    sandbox_dir: Path, relative_path: str | Path, binary: bool
+) -> str | bytes: ...
+
+
+def read_file(
+    sandbox_dir: Path, relative_path: str | Path, binary: bool = False
+) -> str | bytes:
     """Convenience function to read a file within a sandbox directory."""
     tool = FileSystemTool(sandbox_dir=sandbox_dir)
-    return tool.read_file(relative_path)
+    return tool.read_file(relative_path, binary=binary)
 
 
-def write_file(sandbox_dir: Path, relative_path: str | Path, content: str) -> None:
+def read_bytes(sandbox_dir: Path, relative_path: str | Path) -> bytes:
+    """Convenience function to read a binary file within a sandbox directory."""
+    tool = FileSystemTool(sandbox_dir=sandbox_dir)
+    return tool.read_bytes(relative_path)
+
+
+def write_file(
+    sandbox_dir: Path,
+    relative_path: str | Path,
+    content: str | bytes,
+    binary: bool = False,
+) -> None:
     """Convenience function to write a file within a sandbox directory."""
     tool = FileSystemTool(sandbox_dir=sandbox_dir)
-    tool.write_file(relative_path, content)
+    tool.write_file(relative_path, content, binary=binary)
 
 
-async def async_read_file(sandbox_dir: Path, relative_path: str | Path) -> str:
+def write_bytes(sandbox_dir: Path, relative_path: str | Path, content: bytes) -> None:
+    """Convenience function to write a binary file within a sandbox directory."""
+    tool = FileSystemTool(sandbox_dir=sandbox_dir)
+    tool.write_bytes(relative_path, content)
+
+
+@overload
+async def async_read_file(
+    sandbox_dir: Path, relative_path: str | Path, binary: Literal[False] = False
+) -> str: ...
+
+
+@overload
+async def async_read_file(
+    sandbox_dir: Path, relative_path: str | Path, binary: Literal[True]
+) -> bytes: ...
+
+
+@overload
+async def async_read_file(
+    sandbox_dir: Path, relative_path: str | Path, binary: bool
+) -> str | bytes: ...
+
+
+async def async_read_file(
+    sandbox_dir: Path, relative_path: str | Path, binary: bool = False
+) -> str | bytes:
     """Convenience async function to read a file within a sandbox directory."""
     tool = FileSystemTool(sandbox_dir=sandbox_dir)
-    return await tool.async_read_file(relative_path)
+    return await tool.async_read_file(relative_path, binary=binary)
+
+
+async def async_read_bytes(sandbox_dir: Path, relative_path: str | Path) -> bytes:
+    """Convenience async function to read a binary file within a sandbox directory."""
+    tool = FileSystemTool(sandbox_dir=sandbox_dir)
+    return await tool.async_read_bytes(relative_path)
 
 
 async def async_write_file(
-    sandbox_dir: Path, relative_path: str | Path, content: str
+    sandbox_dir: Path,
+    relative_path: str | Path,
+    content: str | bytes,
+    binary: bool = False,
 ) -> None:
     """Convenience async function to write a file within a sandbox directory."""
     tool = FileSystemTool(sandbox_dir=sandbox_dir)
-    await tool.async_write_file(relative_path, content)
+    await tool.async_write_file(relative_path, content, binary=binary)
+
+
+async def async_write_bytes(
+    sandbox_dir: Path, relative_path: str | Path, content: bytes
+) -> None:
+    """Convenience async function to write a binary file within a sandbox directory."""
+    tool = FileSystemTool(sandbox_dir=sandbox_dir)
+    await tool.async_write_bytes(relative_path, content)
 
 
 async def run_shell(

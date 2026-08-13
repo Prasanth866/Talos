@@ -24,9 +24,13 @@ app.add_middleware(LoggingAndCorrelationIdMiddleware)  # type: ignore[arg-type]
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(
-    _request: Request, _exc: Exception
-) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception(
+        "unhandled_exception",
+        path=request.url.path,
+        method=request.method,
+        exc_info=exc,
+    )
     correlation_id = structlog.contextvars.get_contextvars().get("correlation_id")
     if not isinstance(correlation_id, str):
         correlation_id = None
