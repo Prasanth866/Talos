@@ -244,12 +244,10 @@ def test_binary_file_write_and_read(tmp_path: Path) -> None:
     result_bytes = fs.read_bytes(file_path)
     assert result_bytes == raw_bytes
 
-    # Test via binary flag in read_file and write_file
     flag_file = "binary/flag_test.bin"
     fs.write_file(flag_file, raw_bytes, binary=True)
     assert fs.read_file(flag_file, binary=True) == raw_bytes
 
-    # Test standalone helper functions
     helper_file = "binary/helper.bin"
     write_bytes(tmp_path, helper_file, raw_bytes)
     assert read_bytes(tmp_path, helper_file) == raw_bytes
@@ -267,7 +265,6 @@ async def test_async_binary_file_operations(tmp_path: Path) -> None:
     result = await fs.async_read_bytes(file_path)
     assert result == raw_bytes
 
-    # Async helper functions
     helper_file = "async_binary/helper.bin"
     await async_write_bytes(tmp_path, helper_file, raw_bytes)
     helper_res = await async_read_bytes(tmp_path, helper_file)
@@ -281,7 +278,6 @@ async def test_read_file_overload_signatures(tmp_path: Path) -> None:
     file_path = "overload_test.txt"
     fs.write_file(file_path, "overload text")
 
-    # Method calls with literal False, literal True, and dynamic bool
     str_res: str = fs.read_file(file_path, binary=False)
     assert isinstance(str_res, str)
 

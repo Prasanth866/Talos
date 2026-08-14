@@ -17,7 +17,6 @@ def _find_root(marker: str = "pyproject.toml") -> Path:
         if (parent / marker).exists():
             return parent
 
-    # Fallback to standard package root depth relative to config.py if marker file is missing (e.g. slim Docker images)
     return current.parents[2] if len(current.parents) > 2 else current.parent
 
 
