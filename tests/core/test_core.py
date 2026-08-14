@@ -44,7 +44,7 @@ def test_setup_logging_production_environment() -> None:
 def test_logging_and_correlation_id_middleware_valid_uuid() -> None:
     """Verifies middleware preserves incoming valid UUID correlation IDs."""
     test_app = FastAPI()
-    test_app.add_middleware(LoggingAndCorrelationIdMiddleware)
+    test_app.add_middleware(LoggingAndCorrelationIdMiddleware)  # type: ignore[arg-type]
 
     @test_app.get("/ping")
     def ping() -> dict[str, str]:
@@ -61,7 +61,7 @@ def test_logging_and_correlation_id_middleware_valid_uuid() -> None:
 def test_logging_and_correlation_id_middleware_invalid_uuid() -> None:
     """Verifies middleware generates a new UUID if incoming correlation ID is invalid."""
     test_app = FastAPI()
-    test_app.add_middleware(LoggingAndCorrelationIdMiddleware)
+    test_app.add_middleware(LoggingAndCorrelationIdMiddleware)  # type: ignore[arg-type]
 
     @test_app.get("/ping")
     def ping() -> dict[str, str]:
@@ -80,7 +80,7 @@ def test_logging_and_correlation_id_middleware_invalid_uuid() -> None:
 def test_logging_and_correlation_id_middleware_missing_header() -> None:
     """Verifies middleware generates a valid UUID when X-Request-ID header is omitted."""
     test_app = FastAPI()
-    test_app.add_middleware(LoggingAndCorrelationIdMiddleware)
+    test_app.add_middleware(LoggingAndCorrelationIdMiddleware)  # type: ignore[arg-type]
 
     @test_app.get("/ping")
     def ping() -> dict[str, str]:

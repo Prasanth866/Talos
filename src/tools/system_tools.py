@@ -57,6 +57,23 @@ class FileSystemTool:
             )
         return target_path
 
+    def _get_validated_file_path(self, relative_path: str | Path) -> Path:
+        """Resolves path safely and asserts that it exists and is a file."""
+        safe_path = self._resolve_safe_path(relative_path)
+        if not safe_path.exists():
+            raise ToolError(
+                message=f"File not found: '{relative_path}'",
+                tool_name="FileSystemTool",
+                details={"path": str(relative_path)},
+            )
+        if safe_path.is_dir():
+            raise ToolError(
+                message=f"Path '{relative_path}' is a directory, not a file.",
+                tool_name="FileSystemTool",
+                details={"path": str(relative_path)},
+            )
+        return safe_path
+
     @overload
     def read_file(
         self, relative_path: str | Path, binary: Literal[False] = False
@@ -72,19 +89,7 @@ class FileSystemTool:
         """Reads file contents from the sandbox directory."""
         if binary:
             return self.read_bytes(relative_path)
-        safe_path = self._resolve_safe_path(relative_path)
-        if not safe_path.exists():
-            raise ToolError(
-                message=f"File not found: '{relative_path}'",
-                tool_name="FileSystemTool",
-                details={"path": str(relative_path)},
-            )
-        if safe_path.is_dir():
-            raise ToolError(
-                message=f"Path '{relative_path}' is a directory, not a file.",
-                tool_name="FileSystemTool",
-                details={"path": str(relative_path)},
-            )
+        safe_path = self._get_validated_file_path(relative_path)
         try:
             return safe_path.read_text(encoding="utf-8")
         except Exception as exc:
@@ -96,19 +101,7 @@ class FileSystemTool:
 
     def read_bytes(self, relative_path: str | Path) -> bytes:
         """Reads raw binary content from a file in the sandbox directory."""
-        safe_path = self._resolve_safe_path(relative_path)
-        if not safe_path.exists():
-            raise ToolError(
-                message=f"File not found: '{relative_path}'",
-                tool_name="FileSystemTool",
-                details={"path": str(relative_path)},
-            )
-        if safe_path.is_dir():
-            raise ToolError(
-                message=f"Path '{relative_path}' is a directory, not a file.",
-                tool_name="FileSystemTool",
-                details={"path": str(relative_path)},
-            )
+        safe_path = self._get_validated_file_path(relative_path)
         try:
             return safe_path.read_bytes()
         except Exception as exc:
@@ -178,7 +171,7 @@ class FileSystemTool:
         self, relative_path: str | Path, binary: bool = False
     ) -> str | bytes:
         """Asynchronously reads file contents offloading disk I/O to a worker thread."""
-        return await asyncio.to_thread(self.read_file, relative_path, binary)
+        return await asyncio.to_thread(lambda: self.read_file(relative_path, binary))
 
     async def async_read_bytes(self, relative_path: str | Path) -> bytes:
         """Asynchronously reads binary file contents offloading disk I/O to a worker thread."""
