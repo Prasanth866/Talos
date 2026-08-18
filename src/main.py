@@ -1,3 +1,4 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import structlog
@@ -12,7 +13,7 @@ logger = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_fast_app: FastAPI):
+async def lifespan(_fast_app: FastAPI) -> AsyncGenerator[None]:
     logger.info("application_startup", status="initializing")
     yield
     logger.info("application_shutdown", status="stopping")
@@ -20,7 +21,7 @@ async def lifespan(_fast_app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-app.add_middleware(LoggingAndCorrelationIdMiddleware)  # type: ignore[arg-type]
+app.add_middleware(LoggingAndCorrelationIdMiddleware)
 
 
 @app.exception_handler(Exception)
