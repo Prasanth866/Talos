@@ -50,7 +50,7 @@ class LoggingAndCorrelationIdMiddleware:
             if message["type"] == "http.response.start":
                 status_code = message["status"]
                 res_headers = MutableHeaders(scope=message)
-                res_headers.append("X-Request-ID", correlation_id)
+                res_headers["X-Request-ID"] = correlation_id
             await send(message)
 
         try:

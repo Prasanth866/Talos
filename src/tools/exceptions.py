@@ -27,7 +27,7 @@ class ToolError(Exception):
 
 
 class PathTraversalError(ToolError):
-    """Raised when an operation attempts to break outside the allowed sandbox directory."""
+    """Raised when an operation attempts to escape the sandbox directory."""
 
     def __init__(
         self,

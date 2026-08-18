@@ -1,5 +1,5 @@
 import os
-from enum import Enum
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
@@ -24,7 +24,7 @@ ROOT_DIR = _find_root()
 ENV_FILE = ROOT_DIR / ".env"
 
 
-class Environment(str, Enum):
+class Environment(StrEnum):
     DEVELOPMENT = "development"
     STAGING = "staging"
     PRODUCTION = "production"

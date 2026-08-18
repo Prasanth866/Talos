@@ -273,7 +273,7 @@ async def test_async_binary_file_operations(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_read_file_overload_signatures(tmp_path: Path) -> None:
-    """Verifies read_file and async_read_file overloads work with string and binary modes."""
+    """Verifies read_file and async_read_file overloads work correctly."""
     fs = FileSystemTool(sandbox_dir=tmp_path)
     file_path = "overload_test.txt"
     fs.write_file(file_path, "overload text")

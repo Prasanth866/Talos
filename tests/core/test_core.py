@@ -59,7 +59,7 @@ def test_logging_and_correlation_id_middleware_valid_uuid() -> None:
 
 
 def test_logging_and_correlation_id_middleware_invalid_uuid() -> None:
-    """Verifies middleware generates a new UUID if incoming correlation ID is invalid."""
+    """Verifies middleware generates a new UUID for invalid correlation IDs."""
     test_app = FastAPI()
     test_app.add_middleware(LoggingAndCorrelationIdMiddleware)
 
@@ -78,7 +78,7 @@ def test_logging_and_correlation_id_middleware_invalid_uuid() -> None:
 
 
 def test_logging_and_correlation_id_middleware_missing_header() -> None:
-    """Verifies middleware generates a valid UUID when X-Request-ID header is omitted."""
+    """Verifies middleware generates a valid UUID when X-Request-ID is omitted."""
     test_app = FastAPI()
     test_app.add_middleware(LoggingAndCorrelationIdMiddleware)
 
@@ -96,7 +96,7 @@ def test_logging_and_correlation_id_middleware_missing_header() -> None:
 
 
 def test_unhandled_exception_handler() -> None:
-    """Verifies unhandled exception handler returns 500 JSONResponse with X-Request-ID."""
+    """Verifies unhandled exception handler returns 500 with X-Request-ID."""
 
     @app.get("/error-route")
     def error_route() -> None:
@@ -129,3 +129,79 @@ def test_find_root_fallback_when_marker_missing() -> None:
     with patch.dict("os.environ", {}, clear=True):
         root = _find_root(marker="non_existent_marker_file_12345.xyz")
         assert root.exists()
+
+
+def test_tool_error_handler_responses() -> None:
+    """Verifies tool error handler maps exception classes to expected status codes."""
+    from src.tools.exceptions import (
+        CommandExecutionError,
+        ExecutionTimeoutError,
+        PathTraversalError,
+        ToolError,
+    )
+
+    test_app = FastAPI()
+    test_app.add_middleware(LoggingAndCorrelationIdMiddleware)
+
+    from src.api.exception_handlers import tool_error_handler
+
+    test_app.add_exception_handler(ToolError, tool_error_handler)  # type: ignore[arg-type]
+
+    @test_app.get("/tool-error")
+    def trigger_tool_error() -> None:
+        raise ToolError("Generic error", tool_name="TestTool")
+
+    @test_app.get("/traversal-error")
+    def trigger_traversal() -> None:
+        raise PathTraversalError(
+            "Access denied", tool_name="FileSystemTool", attempted_path="/etc/passwd"
+        )
+
+    @test_app.get("/timeout-error")
+    def trigger_timeout() -> None:
+        raise ExecutionTimeoutError(
+            "Timed out", tool_name="ShellTool", timeout_seconds=5.0
+        )
+
+    @test_app.get("/command-error")
+    def trigger_command() -> None:
+        raise CommandExecutionError(
+            "Execution failed", tool_name="ShellTool", exit_code=1, stderr="err"
+        )
+
+    client = TestClient(test_app, raise_server_exceptions=False)
+
+    resp1 = client.get("/tool-error")
+    assert resp1.status_code == 400
+    assert resp1.json()["error"] == "ToolError"
+    assert "X-Request-ID" in resp1.headers
+    assert uuid.UUID(resp1.headers["X-Request-ID"])
+
+    resp2 = client.get("/traversal-error")
+    assert resp2.status_code == 403
+    assert resp2.json()["error"] == "PathTraversalError"
+    assert "X-Request-ID" in resp2.headers
+    assert uuid.UUID(resp2.headers["X-Request-ID"])
+
+    resp3 = client.get("/timeout-error")
+    assert resp3.status_code == 504
+    assert resp3.json()["error"] == "ExecutionTimeoutError"
+    assert "X-Request-ID" in resp3.headers
+    assert uuid.UUID(resp3.headers["X-Request-ID"])
+
+    resp4 = client.get("/command-error")
+    assert resp4.status_code == 422
+    assert resp4.json()["error"] == "CommandExecutionError"
+    assert "X-Request-ID" in resp4.headers
+    assert uuid.UUID(resp4.headers["X-Request-ID"])
+
+
+def test_health_endpoint() -> None:
+    """Verifies the /health endpoint returns 200 with expected payload."""
+    client = TestClient(app)
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert "X-Request-ID" in response.headers
+    assert uuid.UUID(response.headers["X-Request-ID"])
