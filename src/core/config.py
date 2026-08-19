@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     environment: Environment = Environment.DEVELOPMENT
     debug: bool = False
 
+    # LLM Settings
+    llm_api_key: str = ""
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = "gpt-4o"
+    llm_timeout_seconds: float = 30.0
+    llm_max_retries: int = 3
+    llm_retry_initial_delay: float = 0.5
+    llm_retry_backoff_factor: float = 2.0
+    llm_max_steps: int = 15
+
     @model_validator(mode="after")
     def _validate_debug_in_production(self) -> Settings:
         if self.environment is Environment.PRODUCTION and self.debug:
