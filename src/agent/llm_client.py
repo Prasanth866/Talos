@@ -21,7 +21,6 @@ def extract_json_payload(text: str) -> dict[str, Any]:
     """Extracts and parses JSON object from an LLM response string."""
     text = text.strip()
 
-    # Try direct parse
     try:
         parsed = json.loads(text)
         if isinstance(parsed, dict):
@@ -29,7 +28,6 @@ def extract_json_payload(text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    # Try markdown code block extraction ```json ... ```
     match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if match:
         try:
@@ -39,7 +37,6 @@ def extract_json_payload(text: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             pass
 
-    # Try finding the first '{' and last '}'
     first_brace = text.find("{")
     last_brace = text.rfind("}")
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
@@ -138,7 +135,6 @@ class MockLLMClient(BaseLLMClient):
         if isinstance(item, Exception):
             raise item
 
-        # Default mock token estimation (~ 4 chars per token)
         prompt_len = sum(len(m.content) for m in messages)
         prompt_tokens = max(1, prompt_len // 4)
 
@@ -156,13 +152,21 @@ class MockLLMClient(BaseLLMClient):
 
 
 class HTTPLLMClient(BaseLLMClient):
-    """OpenAI-compatible HTTP client with retry backoff and token tracking."""
+    """OpenAI-compatible HTTP client with retry backoff and token tracking.
+
+    Can be used as an async context manager for explicit lifecycle management:
+
+        async with HTTPLLMClient(...) as client:
+            response = await client.generate_response(messages)
+
+    Or standalone; call ``aclose()`` when done to release the connection pool.
+    """
 
     def __init__(
         self,
         api_key: str,
-        base_url: str = "https://api.openai.com/v1",
-        model: str = "gpt-4o",
+        base_url: str = "https://api.groq.com/openai/v1",
+        model: str = "openai/gpt-oss-120b",
         timeout_seconds: float = 30.0,
         max_retries: int = 3,
         initial_delay: float = 0.5,
@@ -177,6 +181,25 @@ class HTTPLLMClient(BaseLLMClient):
         self.initial_delay = initial_delay
         self.backoff_factor = backoff_factor
         self.token_tracker = token_tracker or TokenTracker(model_name=model)
+        self._http_client: httpx.AsyncClient | None = None
+
+    async def _get_http_client(self) -> httpx.AsyncClient:
+        """Returns the shared AsyncClient, creating it on first use."""
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(timeout=self.timeout_seconds)
+        return self._http_client
+
+    async def aclose(self) -> None:
+        """Releases the underlying connection pool. Safe to call multiple times."""
+        if self._http_client is not None and not self._http_client.is_closed:
+            await self._http_client.aclose()
+        self._http_client = None
+
+    async def __aenter__(self) -> HTTPLLMClient:
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self.aclose()
 
     def _format_messages_payload(self, messages: list[Message]) -> list[dict[str, Any]]:
         formatted = []
@@ -196,11 +219,10 @@ class HTTPLLMClient(BaseLLMClient):
             "Content-Type": "application/json",
         }
         url = f"{self.base_url}/chat/completions"
-
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
-            return response.json()  # type: ignore[no-any-return]
+        client = await self._get_http_client()
+        response = await client.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        return response.json()  # type: ignore[no-any-return]
 
     async def generate_response(self, messages: list[Message]) -> LLMResponse:
         payload = {
@@ -211,7 +233,6 @@ class HTTPLLMClient(BaseLLMClient):
 
         start_time = time.perf_counter()
 
-        # Wrap API call in exponential backoff retry
         data = await retry_async(
             self._send_request,
             payload,

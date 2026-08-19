@@ -38,7 +38,7 @@ DEFAULT_AGENT_SYSTEM_PROMPT = (
     "}\n"
     "```\n\n"
     "### Available Tools:\n"
-    "{tools_documentation}\n"
+    "<<TOOLS_DOCUMENTATION>>\n"
 )
 
 
@@ -64,7 +64,7 @@ def build_system_prompt(
         if tools_documentation
         else "No external tools registered."
     )
-    prompt = DEFAULT_AGENT_SYSTEM_PROMPT.replace("{tools_documentation}", tools_str)
+    prompt = DEFAULT_AGENT_SYSTEM_PROMPT.replace("<<TOOLS_DOCUMENTATION>>", tools_str)
 
     if custom_instructions:
         prompt += f"\n\n### Custom Task Instructions:\n{custom_instructions.strip()}"

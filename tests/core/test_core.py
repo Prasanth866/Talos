@@ -2,7 +2,9 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from fastapi import FastAPI
+from pydantic import SecretStr
 from starlette.testclient import TestClient
 
 from src.core.config import Environment, Settings, _find_root, get_settings
@@ -34,7 +36,11 @@ def test_setup_logging() -> None:
 
 def test_setup_logging_production_environment() -> None:
     """Verifies setup_logging configures JSON renderer for production environment."""
-    prod_settings = Settings(environment=Environment.PRODUCTION, debug=False)
+    prod_settings = Settings(
+        environment=Environment.PRODUCTION,
+        debug=False,
+        llm_api_key=SecretStr("prod-key-123"),
+    )
     with patch("src.core.logging.get_settings", return_value=prod_settings):
         setup_logging()
         logger = get_logger("test_prod_logger")
@@ -124,11 +130,13 @@ def test_find_root_with_app_root_override(tmp_path: Path) -> None:
         assert root == tmp_path.resolve()
 
 
-def test_find_root_fallback_when_marker_missing() -> None:
-    """Verifies _find_root falls back gracefully when marker is absent."""
-    with patch.dict("os.environ", {}, clear=True):
-        root = _find_root(marker="non_existent_marker_file_12345.xyz")
-        assert root.exists()
+def test_find_root_raises_when_marker_missing() -> None:
+    """Verifies _find_root raises FileNotFoundError when marker is absent."""
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        pytest.raises(FileNotFoundError, match="not found in any parent"),
+    ):
+        _find_root(marker="non_existent_marker_file_12345.xyz")
 
 
 def test_tool_error_handler_responses() -> None:
@@ -205,3 +213,26 @@ def test_health_endpoint() -> None:
     assert response.json() == {"status": "ok"}
     assert "X-Request-ID" in response.headers
     assert uuid.UUID(response.headers["X-Request-ID"])
+
+
+def test_settings_llm_api_key_is_secret_str() -> None:
+    """Verifies llm_api_key is SecretStr and masked in repr."""
+    settings = Settings(llm_api_key=SecretStr("sk-test-secret-key-123"))
+    # SecretStr masks value in string representation
+    assert "sk-test-secret-key-123" not in repr(settings)
+    assert "sk-test-secret-key-123" not in str(settings.llm_api_key)
+    # Actual value accessible via get_secret_value()
+    assert settings.llm_api_key.get_secret_value() == "sk-test-secret-key-123"
+
+
+def test_settings_requires_api_key_in_production() -> None:
+    """Verifies that production/staging environments require LLM_API_KEY."""
+    with pytest.raises(ValueError, match="LLM_API_KEY is required"):
+        Settings(environment=Environment.PRODUCTION, llm_api_key=SecretStr(""))
+
+    with pytest.raises(ValueError, match="LLM_API_KEY is required"):
+        Settings(environment=Environment.STAGING, llm_api_key=SecretStr(""))
+
+    # Development allows empty key (for MockLLMClient testing)
+    settings = Settings(environment=Environment.DEVELOPMENT, llm_api_key=SecretStr(""))
+    assert settings.llm_api_key.get_secret_value() == ""

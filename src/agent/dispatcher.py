@@ -99,9 +99,7 @@ class ToolDispatcher:
             else:
                 raw_result = tool_def.handler(**kwargs)
 
-            # Format result string
             if isinstance(raw_result, dict):
-                # E.g. Shell output: {"exit_code": 0, "stdout": "...", "stderr": "..."}
                 if "exit_code" in raw_result:
                     exit_code = raw_result.get("exit_code")
                     stdout = raw_result.get("stdout", "")
@@ -185,7 +183,6 @@ def create_default_dispatcher(sandbox_dir: Path) -> ToolDispatcher:
 
     dispatcher = ToolDispatcher()
 
-    # 1. read_file
     def _read_file(path: str) -> str:
         return fs.read_file(path)
 
@@ -205,7 +202,6 @@ def create_default_dispatcher(sandbox_dir: Path) -> ToolDispatcher:
         },
     )
 
-    # 2. write_file
     def _write_file(path: str, content: str) -> str:
         fs.write_file(path, content)
         return f"File '{path}' written successfully."
@@ -230,16 +226,17 @@ def create_default_dispatcher(sandbox_dir: Path) -> ToolDispatcher:
         },
     )
 
-    # 3. list_dir
     def _list_dir(path: str = ".") -> str:
-        safe_path = fs._resolve_safe_path(path)
-        if not safe_path.exists():
+        target = (sandbox_dir / path).resolve()
+        if not str(target).startswith(str(sandbox_dir)):
+            return f"Error: Path '{path}' is outside the sandbox."
+        if not target.exists():
             return f"Error: Directory '{path}' does not exist."
-        if not safe_path.is_dir():
+        if not target.is_dir():
             return f"Error: Path '{path}' is not a directory."
 
         entries = []
-        for entry in sorted(safe_path.iterdir()):
+        for entry in sorted(target.iterdir()):
             rel = entry.relative_to(sandbox_dir)
             type_str = "DIR " if entry.is_dir() else "FILE"
             entries.append(f"[{type_str}] {rel}")
@@ -262,7 +259,6 @@ def create_default_dispatcher(sandbox_dir: Path) -> ToolDispatcher:
         },
     )
 
-    # 4. run_shell
     async def _run_shell(command: str) -> dict[str, str | int]:
         return await shell.run_shell(command)
 

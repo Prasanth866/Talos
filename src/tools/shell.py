@@ -1,4 +1,5 @@
 import asyncio
+import re
 import shlex
 from collections.abc import Sequence
 from contextlib import suppress
@@ -12,6 +13,53 @@ from src.tools.exceptions import (
 
 MAX_OUTPUT_CHARS = 4000
 
+# Commands that are too dangerous for an autonomous agent to execute.
+# This is a heuristic defense layer — production deployments should also
+# enforce OS-level isolation (containers, bubblewrap, nsjail).
+_DENIED_EXECUTABLES = frozenset(
+    {
+        "sudo",
+        "su",
+        "chown",
+        "chmod",
+        "chgrp",
+        "curl",
+        "wget",
+        "nc",
+        "ncat",
+        "netcat",
+        "ssh",
+        "scp",
+        "rsync",
+        "ftp",
+        "sftp",
+        "docker",
+        "podman",
+        "kubectl",
+        "mount",
+        "umount",
+        "mkfs",
+        "fdisk",
+        "shutdown",
+        "reboot",
+        "halt",
+        "init",
+        "dd",
+        "shred",
+        "nohup",
+    }
+)
+
+# Shell patterns that indicate dangerous intent regardless of executable.
+_DENIED_PATTERNS = [
+    re.compile(r"rm\s+.*-.*r.*f", re.IGNORECASE),  # rm -rf / rm -fr
+    re.compile(r"rm\s+-rf\s+/", re.IGNORECASE),  # rm -rf /
+    re.compile(r">{1,2}\s*/dev/"),  # redirect to /dev/
+    re.compile(r"\|\s*(bash|sh|zsh|dash)"),  # pipe to shell
+    re.compile(r"mkfifo"),  # named pipes
+    re.compile(r"eval\s"),  # eval injection
+]
+
 
 def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     if len(text) <= limit:
@@ -20,12 +68,34 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 
 
 class ShellTool:
-    """Defensive shell command executor with timeouts."""
+    """Defensive shell command executor with timeouts and command safety checks."""
 
     def __init__(self, working_dir: Path, timeout_seconds: float = 10.0) -> None:
         self.working_dir = working_dir.resolve()
         self.working_dir.mkdir(parents=True, exist_ok=True)
         self.timeout_seconds = timeout_seconds
+
+    @staticmethod
+    def _check_command_safety(command_str: str, executable: str) -> None:
+        """Raises ToolError if the command matches known dangerous patterns."""
+        exe_basename = Path(executable).name.lower()
+        if exe_basename in _DENIED_EXECUTABLES:
+            raise ToolError(
+                message=f"Command '{exe_basename}' is not permitted.",
+                tool_name="ShellTool",
+                details={"executable": executable, "reason": "denied_executable"},
+            )
+        for pattern in _DENIED_PATTERNS:
+            if pattern.search(command_str):
+                raise ToolError(
+                    message="Command matches a denied safety pattern.",
+                    tool_name="ShellTool",
+                    details={
+                        "command": command_str,
+                        "pattern": pattern.pattern,
+                        "reason": "denied_pattern",
+                    },
+                )
 
     async def run_shell(
         self,
@@ -70,6 +140,10 @@ class ShellTool:
                 tool_name="ShellTool",
                 details={"executable": executable},
             )
+
+        # Validate command against denylist before execution
+        cmd_string = f"{executable} {' '.join(cmd_args)}"
+        self._check_command_safety(cmd_string, executable)
 
         process: asyncio.subprocess.Process | None = None
         try:

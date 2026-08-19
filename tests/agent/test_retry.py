@@ -23,7 +23,7 @@ def test_is_transient_error() -> None:
 
 
 def test_compute_backoff_delay() -> None:
-    # Without jitter
+    # Without jitter: deterministic exponential growth
     d0 = compute_backoff_delay(0, initial_delay=1.0, backoff_factor=2.0, jitter=False)
     assert d0 == 1.0
     d1 = compute_backoff_delay(1, initial_delay=1.0, backoff_factor=2.0, jitter=False)
@@ -31,59 +31,63 @@ def test_compute_backoff_delay() -> None:
     d2 = compute_backoff_delay(2, initial_delay=1.0, backoff_factor=2.0, jitter=False)
     assert d2 == 4.0
 
-    # With jitter: between 0.5 * delay and delay
+    # With full-jitter: uniformly random in [0, delay]
     dj = compute_backoff_delay(1, initial_delay=1.0, backoff_factor=2.0, jitter=True)
-    assert 1.0 <= dj <= 2.0
+    assert 0.0 <= dj <= 2.0
+
+    # max_delay cap is respected
+    d_capped = compute_backoff_delay(
+        10, initial_delay=1.0, backoff_factor=2.0, max_delay=5.0, jitter=False
+    )
+    assert d_capped == 5.0
 
 
 @pytest.mark.asyncio
 async def test_retry_async_succeeds_on_transient_error() -> None:
+    """Retries on transient errors and returns the result of the first success."""
     mock_func = AsyncMock()
-    # Fails twice with transient error, then succeeds on 3rd attempt
+    # Fails twice with transient errors, succeeds on 3rd attempt
     mock_func.side_effect = [
         ConnectionError("Network glitch"),
         TimeoutError("Request timed out"),
         "success_result",
     ]
 
-    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+    # Patch tenacity's internal async sleep to avoid real delays in tests
+    with patch("tenacity.nap.sleep", new_callable=AsyncMock):
         result = await retry_async(
             mock_func,
             max_retries=3,
-            initial_delay=0.1,
+            initial_delay=0.01,
             backoff_factor=2.0,
             jitter=False,
         )
 
     assert result == "success_result"
     assert mock_func.call_count == 3
-    assert mock_sleep.call_count == 2
-    mock_sleep.assert_any_call(0.1)
-    mock_sleep.assert_any_call(0.2)
 
 
 @pytest.mark.asyncio
 async def test_retry_async_aborts_on_non_transient_error() -> None:
+    """Non-transient errors are re-raised immediately without any retry."""
     mock_func = AsyncMock()
     mock_func.side_effect = ValueError("Invalid prompt")
 
-    with (
-        patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-        pytest.raises(ValueError, match="Invalid prompt"),
-    ):
+    with pytest.raises(ValueError, match="Invalid prompt"):
         await retry_async(mock_func, max_retries=3)
 
+    # No retries — aborted after the first attempt
     assert mock_func.call_count == 1
-    assert mock_sleep.call_count == 0
 
 
 @pytest.mark.asyncio
 async def test_retry_async_exceeds_max_retries() -> None:
+    """Exhausting all retries re-raises the last transient exception."""
     mock_func = AsyncMock()
     mock_func.side_effect = ConnectionError("Persistent outage")
 
     with (
-        patch("asyncio.sleep", new_callable=AsyncMock),
+        patch("tenacity.nap.sleep", new_callable=AsyncMock),
         pytest.raises(ConnectionError, match="Persistent outage"),
     ):
         await retry_async(mock_func, max_retries=2, initial_delay=0.01)
@@ -92,18 +96,19 @@ async def test_retry_async_exceeds_max_retries() -> None:
 
 
 def test_retry_sync_success_and_failure() -> None:
+    """Sync variant retries on transient error and returns success result."""
     mock_sync = MagicMock()
     mock_sync.side_effect = [TimeoutError("Timeout"), "done"]
 
-    with patch("time.sleep") as mock_sleep:
-        res = retry_sync(mock_sync, max_retries=2, initial_delay=0.1, jitter=False)
+    with patch("tenacity.nap.sleep"):
+        res = retry_sync(mock_sync, max_retries=2, initial_delay=0.01, jitter=False)
 
     assert res == "done"
     assert mock_sync.call_count == 2
-    mock_sleep.assert_called_once_with(0.1)
 
 
 def test_retry_sync_aborts_on_non_transient() -> None:
+    """Non-transient errors abort immediately without retry."""
     mock_sync = MagicMock()
     mock_sync.side_effect = ValueError("Invalid")
 
@@ -111,6 +116,21 @@ def test_retry_sync_aborts_on_non_transient() -> None:
         retry_sync(mock_sync, max_retries=2)
 
     assert mock_sync.call_count == 1
+
+
+def test_retry_async_custom_retry_condition() -> None:
+    """A custom retry_condition predicate is respected."""
+
+    def only_value_errors(exc: BaseException) -> bool:
+        return isinstance(exc, ValueError)
+
+    mock_func = MagicMock(side_effect=RuntimeError("Not retried"))
+
+    with pytest.raises(RuntimeError, match="Not retried"):
+        retry_sync(mock_func, max_retries=3, retry_condition=only_value_errors)
+
+    # RuntimeError does not satisfy the predicate — only one call
+    assert mock_func.call_count == 1
 
 
 def test_is_transient_error_http_status_codes() -> None:

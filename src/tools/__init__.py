@@ -20,7 +20,6 @@ from src.tools.filesystem import (
 from src.tools.shell import (
     MAX_OUTPUT_CHARS,
     ShellTool,
-    _truncate,
     run_shell,
 )
 
@@ -32,7 +31,6 @@ __all__ = [
     "PathTraversalError",
     "ShellTool",
     "ToolError",
-    "_truncate",
     "async_read_bytes",
     "async_read_file",
     "async_write_bytes",

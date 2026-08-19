@@ -18,6 +18,8 @@ from src.agent.prompts import build_system_prompt
 
 logger = structlog.get_logger(__name__)
 
+MAX_OBSERVATION_CHARS = 8000
+
 
 class ReasoningLoop:
     """Coordinates the core agent reasoning loop:
@@ -29,12 +31,22 @@ class ReasoningLoop:
         llm_client: BaseLLMClient,
         dispatcher: ToolDispatcher,
         max_steps: int = 15,
+        max_observation_chars: int = MAX_OBSERVATION_CHARS,
         custom_system_instructions: str | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.dispatcher = dispatcher
         self.max_steps = max_steps
+        self.max_observation_chars = max_observation_chars
         self.custom_system_instructions = custom_system_instructions
+
+    @staticmethod
+    def _truncate_observation(text: str, limit: int) -> str:
+        """Truncates observation text to stay within context budget."""
+        if len(text) <= limit:
+            return text
+        kept = limit - 80
+        return text[:kept] + f"\n... [truncated {len(text) - kept} chars]"
 
     async def run(
         self,
@@ -69,7 +81,6 @@ class ReasoningLoop:
         for step_num in range(1, self.max_steps + 1):
             step_start = time.perf_counter()
 
-            # 1. Query LLM
             try:
                 llm_response = await self.llm_client.generate_response(messages)
             except Exception as exc:
@@ -85,7 +96,6 @@ class ReasoningLoop:
                 )
                 return trajectory
 
-            # 2. Check if agent provided a final answer
             if llm_response.final_answer is not None and not llm_response.tool_call:
                 step_duration = time.perf_counter() - step_start
                 step = AgentStep(
@@ -110,7 +120,14 @@ class ReasoningLoop:
                 )
                 return trajectory
 
-            # 3. Handle tool call
+            if llm_response.final_answer is not None and llm_response.tool_call:
+                logger.warning(
+                    "reasoning_loop_ambiguous_response",
+                    step=step_num,
+                    note="Both final_answer and tool_call returned; tool_call wins.",
+                    tool_name=llm_response.tool_call.tool_name,
+                )
+
             if llm_response.tool_call is not None:
                 tool_call = llm_response.tool_call
                 logger.info(
@@ -121,7 +138,6 @@ class ReasoningLoop:
                     arguments=tool_call.arguments,
                 )
 
-                # Dispatch tool
                 tool_result = await self.dispatcher.execute_tool(tool_call)
 
                 step_duration = time.perf_counter() - step_start
@@ -135,16 +151,18 @@ class ReasoningLoop:
                 )
                 trajectory.add_step(step)
 
-                # Update context for next iteration
                 messages.append(
                     Message(
                         role=MessageRole.ASSISTANT,
                         content=llm_response.raw_content,
                     )
                 )
+                observation = self._truncate_observation(
+                    tool_result.formatted_content,
+                    self.max_observation_chars,
+                )
                 obs_content = (
-                    f"Observation from tool '{tool_call.tool_name}':\n"
-                    f"{tool_result.formatted_content}"
+                    f"Observation from tool '{tool_call.tool_name}':\n{observation}"
                 )
                 messages.append(
                     Message(
@@ -153,7 +171,6 @@ class ReasoningLoop:
                     )
                 )
             else:
-                # Neither final answer nor valid tool call was parsed
                 step_duration = time.perf_counter() - step_start
                 step = AgentStep(
                     step_number=step_num,
@@ -166,7 +183,6 @@ class ReasoningLoop:
                 )
                 trajectory.add_step(step)
 
-                # Prompt model to either pick a tool or provide final_answer
                 messages.append(
                     Message(
                         role=MessageRole.ASSISTANT,
@@ -184,7 +200,6 @@ class ReasoningLoop:
                     )
                 )
 
-        # Max steps exceeded
         trajectory.status = TrajectoryStatus.MAX_STEPS_EXCEEDED
         trajectory.total_duration_seconds = time.perf_counter() - start_time
         trajectory.error = (

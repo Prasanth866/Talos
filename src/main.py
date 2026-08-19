@@ -8,12 +8,12 @@ from src.api.routes.health import router as health_router
 from src.core.logging import get_logger, setup_logging
 from src.core.middleware import LoggingAndCorrelationIdMiddleware
 
-setup_logging()
 logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_fast_app: FastAPI) -> AsyncGenerator[None]:
+    setup_logging()
     logger.info("application_startup", status="initializing")
     yield
     logger.info("application_shutdown", status="stopping")

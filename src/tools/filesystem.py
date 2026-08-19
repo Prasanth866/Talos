@@ -117,8 +117,9 @@ class FileSystemTool:
 
         safe_path = self._resolve_safe_path(relative_path)
         try:
-            safe_path.parent.mkdir(parents=True, exist_ok=True)
-            if not safe_path.parent.resolve().is_relative_to(self.sandbox_dir):
+            # Validate parent directory stays within sandbox BEFORE any mutation
+            parent_resolved = safe_path.parent.resolve()
+            if not parent_resolved.is_relative_to(self.sandbox_dir):
                 raise PathTraversalError(
                     message=(
                         f"Access denied: directory for '{relative_path}'"
@@ -127,6 +128,7 @@ class FileSystemTool:
                     tool_name="FileSystemTool",
                     attempted_path=str(safe_path),
                 )
+            safe_path.parent.mkdir(parents=True, exist_ok=True)
             safe_path.write_text(content, encoding="utf-8")
         except ToolError:
             raise
@@ -141,8 +143,9 @@ class FileSystemTool:
         """Writes raw binary content to a file inside the sandbox directory."""
         safe_path = self._resolve_safe_path(relative_path)
         try:
-            safe_path.parent.mkdir(parents=True, exist_ok=True)
-            if not safe_path.parent.resolve().is_relative_to(self.sandbox_dir):
+            # Validate parent directory stays within sandbox BEFORE any mutation
+            parent_resolved = safe_path.parent.resolve()
+            if not parent_resolved.is_relative_to(self.sandbox_dir):
                 raise PathTraversalError(
                     message=(
                         f"Access denied: directory for '{relative_path}'"
@@ -151,6 +154,7 @@ class FileSystemTool:
                     tool_name="FileSystemTool",
                     attempted_path=str(safe_path),
                 )
+            safe_path.parent.mkdir(parents=True, exist_ok=True)
             safe_path.write_bytes(content)
         except ToolError:
             raise

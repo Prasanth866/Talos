@@ -3,7 +3,7 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,7 +17,10 @@ def _find_root(marker: str = "pyproject.toml") -> Path:
         if (parent / marker).exists():
             return parent
 
-    return current.parents[2] if len(current.parents) > 2 else current.parent
+    raise FileNotFoundError(
+        f"Project root marker '{marker}' not found in any parent of {current}. "
+        "Set the APP_ROOT environment variable to specify the project root."
+    )
 
 
 ROOT_DIR = _find_root()
@@ -40,20 +43,26 @@ class Settings(BaseSettings):
     environment: Environment = Environment.DEVELOPMENT
     debug: bool = False
 
-    # LLM Settings
-    llm_api_key: str = ""
-    llm_base_url: str = "https://api.openai.com/v1"
-    llm_model: str = "gpt-4o"
+    llm_api_key: SecretStr = SecretStr("")
+    llm_base_url: str = "https://api.groq.com/openai/v1"
+    llm_model: str = "openai/gpt-oss-120b"
     llm_timeout_seconds: float = 30.0
     llm_max_retries: int = 3
     llm_retry_initial_delay: float = 0.5
     llm_retry_backoff_factor: float = 2.0
-    llm_max_steps: int = 15
+    llm_max_steps: int = 50
 
     @model_validator(mode="after")
-    def _validate_debug_in_production(self) -> Settings:
+    def _validate_settings(self) -> Settings:
         if self.environment is Environment.PRODUCTION and self.debug:
             raise ValueError("DEBUG must not be enabled in PRODUCTION environment.")
+        if (
+            self.environment in (Environment.PRODUCTION, Environment.STAGING)
+            and not self.llm_api_key.get_secret_value()
+        ):
+            raise ValueError(
+                "LLM_API_KEY is required in PRODUCTION and STAGING environments."
+            )
         return self
 
 

@@ -113,3 +113,43 @@ async def test_reasoning_loop_fallback_on_unformatted_response() -> None:
     assert len(trajectory.steps) == 2
     assert trajectory.steps[0].tool_call is None
     assert trajectory.steps[0].tool_result is None
+
+
+@pytest.mark.asyncio
+async def test_reasoning_loop_observation_truncation() -> None:
+    dispatcher = ToolDispatcher()
+    large_output = "X" * 1000
+    dispatcher.register_tool(
+        name="large_tool",
+        description="Generates large output",
+        handler=lambda: large_output,
+    )
+
+    mock_llm = MockLLMClient(
+        responses=[
+            {
+                "thought": "Calling large tool.",
+                "tool_call": {"tool_name": "large_tool", "arguments": {}},
+            },
+            {
+                "thought": "Received output.",
+                "final_answer": "Done.",
+            },
+        ]
+    )
+
+    runner = ReasoningLoop(
+        llm_client=mock_llm,
+        dispatcher=dispatcher,
+        max_steps=5,
+        max_observation_chars=200,
+    )
+    trajectory = await runner.run("Large output task")
+
+    assert trajectory.status == TrajectoryStatus.COMPLETED
+    assert len(mock_llm.call_history) == 2
+    # Check that message sent to LLM for step 2 contains truncated observation
+    second_call_messages = mock_llm.call_history[1]
+    obs_message = second_call_messages[-1]
+    assert "[truncated" in obs_message.content
+    assert len(obs_message.content) < 500

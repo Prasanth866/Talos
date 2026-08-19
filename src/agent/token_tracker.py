@@ -8,8 +8,12 @@ from src.agent.models import CostRates, TokenUsage
 
 logger = structlog.get_logger(__name__)
 
-# Default pricing rates in USD per 1,000,000 tokens
 MODEL_PRICING: dict[str, CostRates] = {
+    # Groq / Open Source
+    "openai/gpt-oss-120b": CostRates(
+        prompt_cost_per_1m=0.15, completion_cost_per_1m=0.60
+    ),
+    "gpt-oss-120b": CostRates(prompt_cost_per_1m=0.15, completion_cost_per_1m=0.60),
     # OpenAI
     "gpt-4o": CostRates(prompt_cost_per_1m=2.50, completion_cost_per_1m=10.00),
     "gpt-4o-mini": CostRates(prompt_cost_per_1m=0.15, completion_cost_per_1m=0.60),
@@ -29,7 +33,7 @@ MODEL_PRICING: dict[str, CostRates] = {
     "deepseek-chat": CostRates(prompt_cost_per_1m=0.14, completion_cost_per_1m=0.28),
 }
 
-DEFAULT_COST_RATES = CostRates(prompt_cost_per_1m=2.50, completion_cost_per_1m=10.00)
+DEFAULT_COST_RATES = CostRates(prompt_cost_per_1m=0.15, completion_cost_per_1m=0.60)
 
 
 class TokenTracker:
@@ -37,7 +41,7 @@ class TokenTracker:
 
     def __init__(
         self,
-        model_name: str = "gpt-4o",
+        model_name: str = "openai/gpt-oss-120b",
         custom_rates: CostRates | None = None,
     ) -> None:
         self.model_name = model_name

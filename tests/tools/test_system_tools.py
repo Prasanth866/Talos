@@ -9,11 +9,11 @@ from src.tools.exceptions import (
     PathTraversalError,
     ToolError,
 )
+from src.tools.shell import _truncate
 from src.tools.system_tools import (
     MAX_OUTPUT_CHARS,
     FileSystemTool,
     ShellTool,
-    _truncate,
     async_read_bytes,
     async_read_file,
     async_write_bytes,
@@ -310,3 +310,23 @@ async def test_read_file_overload_signatures(tmp_path: Path) -> None:
 
     async_helper_bin: bytes = await async_read_file(tmp_path, file_path, binary=True)
     assert isinstance(async_helper_bin, bytes)
+
+
+@pytest.mark.asyncio
+async def test_shell_denied_executables_and_patterns(tmp_path: Path) -> None:
+    """Verifies that dangerous commands and executables are blocked by ShellTool."""
+    tool = ShellTool(working_dir=tmp_path)
+
+    # Denied executables
+    with pytest.raises(ToolError, match="not permitted"):
+        await tool.run_shell("sudo ls")
+
+    with pytest.raises(ToolError, match="not permitted"):
+        await tool.run_shell("curl https://example.com")
+
+    # Denied dangerous patterns
+    with pytest.raises(ToolError, match="denied safety pattern"):
+        await tool.run_shell("rm -rf /")
+
+    with pytest.raises(ToolError, match="denied safety pattern"):
+        await tool.run_shell("echo test | bash")

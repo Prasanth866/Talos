@@ -18,7 +18,7 @@ class MessageRole(StrEnum):
 class ToolCall(BaseModel):
     """Represents a tool call chosen by the LLM."""
 
-    id: str = Field(default_factory=lambda: f"call_{uuid4().hex[:8]}")
+    id: str = Field(default_factory=lambda: f"call_{uuid4().hex[:12]}")
     tool_name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
 
@@ -60,8 +60,8 @@ class TokenUsage(BaseModel):
 class CostRates(BaseModel):
     """Pricing rates per 1,000,000 tokens in USD."""
 
-    prompt_cost_per_1m: float = 2.50  # Default ~ GPT-4o input
-    completion_cost_per_1m: float = 10.00  # Default ~ GPT-4o output
+    prompt_cost_per_1m: float = 2.50
+    completion_cost_per_1m: float = 10.00
 
     def calculate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
         cost = (prompt_tokens * self.prompt_cost_per_1m / 1_000_000.0) + (
@@ -188,6 +188,8 @@ class ReasoningTrajectory(BaseModel):
             if step.tool_result:
                 status_str = "SUCCESS" if step.tool_result.success else "FAILED"
                 obs = step.tool_result.formatted_content
+                if len(obs) > 500:
+                    obs = obs[:500] + f"... [{len(obs) - 500} chars truncated]"
                 lines.append(f"  Observation ({status_str}): {obs}")
             tokens_str = f"{step.token_usage.total_tokens} tokens"
             cost_str = f"${step.token_usage.estimated_cost_usd:.5f}"
