@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -15,6 +16,14 @@ from src.agent.models import (
     TrajectoryStatus,
 )
 from src.agent.prompts import build_system_prompt
+from src.api.schemas.events import (
+    AgentEvent,
+    ErrorEvent,
+    TaskCompleteEvent,
+    ThoughtEvent,
+    ToolCallEvent,
+    ToolOutputEvent,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -52,6 +61,7 @@ class ReasoningLoop:
         self,
         task: str,
         metadata: dict[str, Any] | None = None,
+        on_event: Callable[[AgentEvent], Awaitable[None]] | None = None,
     ) -> ReasoningTrajectory:
         """Executes the autonomous reasoning loop for a given task description."""
         start_time = time.perf_counter()
@@ -59,6 +69,17 @@ class ReasoningLoop:
             task=task,
             metadata=metadata or {},
         )
+
+        async def _emit(event: AgentEvent) -> None:
+            if on_event is not None:
+                try:
+                    await on_event(event)
+                except Exception as cb_err:
+                    logger.warning(
+                        "event_callback_failed",
+                        error=str(cb_err),
+                        event_type=event.event_type,
+                    )
 
         tools_doc = self.dispatcher.get_tools_documentation()
         system_prompt = build_system_prompt(
@@ -88,6 +109,12 @@ class ReasoningLoop:
                 trajectory.status = TrajectoryStatus.FAILED
                 trajectory.error = f"LLM generation failed: {exc}"
                 trajectory.total_duration_seconds = duration
+                await _emit(
+                    ErrorEvent(
+                        error=f"LLM generation failed: {exc}",
+                        step=step_num,
+                    )
+                )
                 logger.error(
                     "reasoning_loop_llm_failed",
                     step=step_num,
@@ -95,6 +122,15 @@ class ReasoningLoop:
                     exc_info=True,
                 )
                 return trajectory
+
+            # Emit thought once if present
+            if llm_response.thought:
+                await _emit(
+                    ThoughtEvent(
+                        thought=llm_response.thought,
+                        step=step_num,
+                    )
+                )
 
             if llm_response.final_answer is not None and not llm_response.tool_call:
                 step_duration = time.perf_counter() - step_start
@@ -110,6 +146,17 @@ class ReasoningLoop:
                 trajectory.status = TrajectoryStatus.COMPLETED
                 trajectory.final_answer = llm_response.final_answer
                 trajectory.total_duration_seconds = time.perf_counter() - start_time
+
+                await _emit(
+                    TaskCompleteEvent(
+                        task=task,
+                        final_answer=llm_response.final_answer,
+                        total_steps=len(trajectory.steps),
+                        total_tokens=trajectory.total_tokens.total_tokens,
+                        total_cost_usd=trajectory.total_cost_usd,
+                        duration_seconds=trajectory.total_duration_seconds,
+                    )
+                )
 
                 logger.info(
                     "reasoning_loop_completed",
@@ -138,6 +185,15 @@ class ReasoningLoop:
                     arguments=tool_call.arguments,
                 )
 
+                await _emit(
+                    ToolCallEvent(
+                        tool_name=tool_call.tool_name,
+                        tool_call_id=tool_call.id,
+                        arguments=tool_call.arguments,
+                        step=step_num,
+                    )
+                )
+
                 tool_result = await self.dispatcher.execute_tool(tool_call)
 
                 step_duration = time.perf_counter() - step_start
@@ -150,6 +206,17 @@ class ReasoningLoop:
                     duration_seconds=step_duration,
                 )
                 trajectory.add_step(step)
+
+                await _emit(
+                    ToolOutputEvent(
+                        tool_name=tool_result.tool_name,
+                        tool_call_id=tool_call.id,
+                        output=tool_result.formatted_content,
+                        success=tool_result.success,
+                        duration_seconds=tool_result.duration_seconds,
+                        step=step_num,
+                    )
+                )
 
                 messages.append(
                     Message(
@@ -205,6 +272,12 @@ class ReasoningLoop:
         trajectory.error = (
             f"Agent reached maximum allowed steps ({self.max_steps}) "
             "without completing the task."
+        )
+        await _emit(
+            ErrorEvent(
+                error=trajectory.error,
+                step=self.max_steps,
+            )
         )
         logger.warning(
             "reasoning_loop_max_steps_exceeded",
