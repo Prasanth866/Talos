@@ -20,6 +20,7 @@ class BaseEvent(BaseModel):
 
     version: str = "v1"
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    task_id: str | None = None
     event_type: EventType
 
 

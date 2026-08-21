@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     llm_retry_backoff_factor: float = 2.0
     llm_max_steps: int = 50
 
+    worker_concurrency: int = 4
+    task_queue_max_size: int = 100
+    shutdown_drain_timeout_seconds: float = 30.0
+
     @model_validator(mode="after")
     def _validate_settings(self) -> Settings:
         if self.environment is Environment.PRODUCTION and self.debug:

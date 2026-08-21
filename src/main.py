@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -7,18 +10,36 @@ from src.api.exception_handlers import register_exception_handlers
 from src.api.routes.health import router as health_router
 from src.api.routes.tasks import router as tasks_router
 from src.api.routes.websocket import router as websocket_router
+from src.core.config import get_settings
 from src.core.logging import get_logger, setup_logging
 from src.core.middleware import LoggingAndCorrelationIdMiddleware
+from src.core.worker import TaskManager
 
 logger = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_fast_app: FastAPI) -> AsyncGenerator[None]:
+async def lifespan(fast_app: FastAPI) -> AsyncGenerator[None]:
     setup_logging()
     logger.info("application_startup", status="initializing")
-    yield
-    logger.info("application_shutdown", status="stopping")
+    settings = get_settings()
+
+    loop_factory = getattr(fast_app.state, "reasoning_loop_factory", None)
+    task_manager = TaskManager(settings=settings, loop_factory=loop_factory)
+    fast_app.state.task_manager = task_manager
+
+    async with asyncio.TaskGroup() as task_group:
+        task_manager.start(task_group)
+        logger.info(
+            "worker_pool_started",
+            workers=settings.worker_concurrency,
+            queue_capacity=settings.task_queue_max_size,
+        )
+        yield
+        logger.info("application_shutdown", status="draining_workers")
+        await task_manager.stop()
+
+    logger.info("application_shutdown", status="stopped")
 
 
 app = FastAPI(

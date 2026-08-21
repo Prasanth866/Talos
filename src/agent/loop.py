@@ -62,6 +62,7 @@ class ReasoningLoop:
         task: str,
         metadata: dict[str, Any] | None = None,
         on_event: Callable[[AgentEvent], Awaitable[None]] | None = None,
+        task_id: str | None = None,
     ) -> ReasoningTrajectory:
         """Executes the autonomous reasoning loop for a given task description."""
         start_time = time.perf_counter()
@@ -113,6 +114,7 @@ class ReasoningLoop:
                     ErrorEvent(
                         error=f"LLM generation failed: {exc}",
                         step=step_num,
+                        task_id=task_id,
                     )
                 )
                 logger.error(
@@ -123,12 +125,12 @@ class ReasoningLoop:
                 )
                 return trajectory
 
-            # Emit thought once if present
             if llm_response.thought:
                 await _emit(
                     ThoughtEvent(
                         thought=llm_response.thought,
                         step=step_num,
+                        task_id=task_id,
                     )
                 )
 
@@ -155,6 +157,7 @@ class ReasoningLoop:
                         total_tokens=trajectory.total_tokens.total_tokens,
                         total_cost_usd=trajectory.total_cost_usd,
                         duration_seconds=trajectory.total_duration_seconds,
+                        task_id=task_id,
                     )
                 )
 
@@ -191,6 +194,7 @@ class ReasoningLoop:
                         tool_call_id=tool_call.id,
                         arguments=tool_call.arguments,
                         step=step_num,
+                        task_id=task_id,
                     )
                 )
 
@@ -215,6 +219,7 @@ class ReasoningLoop:
                         success=tool_result.success,
                         duration_seconds=tool_result.duration_seconds,
                         step=step_num,
+                        task_id=task_id,
                     )
                 )
 
@@ -277,6 +282,7 @@ class ReasoningLoop:
             ErrorEvent(
                 error=trajectory.error,
                 step=self.max_steps,
+                task_id=task_id,
             )
         )
         logger.warning(

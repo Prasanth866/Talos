@@ -17,17 +17,19 @@ from src.api.schemas.events import (
 
 
 def test_thought_event_schema() -> None:
-    """Verifies ThoughtEvent validates fields and default version."""
-    event = ThoughtEvent(thought="Analyzing task", step=1)
+    """Verifies ThoughtEvent validates fields, default version, and task_id."""
+    event = ThoughtEvent(thought="Analyzing task", step=1, task_id="test-task-123")
     assert event.event_type == EventType.THOUGHT
     assert event.version == "v1"
     assert event.thought == "Analyzing task"
     assert event.step == 1
+    assert event.task_id == "test-task-123"
     assert event.timestamp is not None
 
     dumped = event.model_dump(mode="json")
     assert dumped["event_type"] == "thought"
     assert dumped["version"] == "v1"
+    assert dumped["task_id"] == "test-task-123"
 
 
 def test_tool_call_event_schema() -> None:

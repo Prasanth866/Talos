@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +13,7 @@ from src.agent.llm_client import MockLLMClient
 from src.agent.loop import ReasoningLoop
 from src.api.routes.websocket import get_default_loop_factory
 from src.core.config import Settings
+from src.core.worker import TaskManager
 from src.main import app
 
 
@@ -45,13 +49,14 @@ def test_openapi_docs(client: TestClient) -> None:
 
 
 def test_submit_task_success(client: TestClient) -> None:
-    """Verifies POST /tasks accepts a task and returns 202 with task_id."""
+    """Verifies POST /tasks accepts a task and returns 202 with UUID task_id."""
     payload = {"task": "Refactor auth module", "metadata": {"user": "alice"}}
     response = client.post("/tasks", json=payload)
     assert response.status_code == 202
     data = response.json()
     assert data["status"] == "queued"
-    assert data["task_id"].startswith("task_")
+    task_uuid = uuid.UUID(data["task_id"])
+    assert str(task_uuid) == data["task_id"]
     assert f"/ws?task_id={data['task_id']}" == data["ws_url"]
 
 
@@ -61,8 +66,40 @@ def test_submit_task_validation_error(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_submit_task_returns_503_when_queue_full() -> None:
+    """Verifies POST /tasks returns 503 with Retry-After when queue is full."""
+    settings = Settings(task_queue_max_size=1, worker_concurrency=0)
+
+    with (
+        patch("src.main.get_settings", return_value=settings),
+        TestClient(app) as test_client,
+    ):
+        # First task succeeds
+        res1 = test_client.post("/tasks", json={"task": "Task 1"})
+        assert res1.status_code == 202
+
+        # Second task rejected because queue is full (maxsize=1)
+        res2 = test_client.post("/tasks", json={"task": "Task 2"})
+        assert res2.status_code == 503
+        assert res2.json() == {"detail": "Task queue is full"}
+        assert res2.headers.get("Retry-After") == "5"
+
+
+def test_submit_task_returns_503_when_shutting_down(client: TestClient) -> None:
+    """Verifies POST /tasks returns 503 when server is shutting down."""
+    task_mgr: TaskManager = app.state.task_manager
+    task_mgr._shutting_down = True
+    try:
+        res = client.post("/tasks", json={"task": "Task while shutting down"})
+        assert res.status_code == 503
+        assert res.json() == {"detail": "Server is shutting down"}
+        assert res.headers.get("Retry-After") == "5"
+    finally:
+        task_mgr._shutting_down = False
+
+
 def test_websocket_streaming_flow(tmp_path: Path) -> None:
-    """Verifies full WebSocket event streaming with thoughts and tool calls."""
+    """Verifies full WebSocket event streaming with thoughts and UUID task_id."""
     dispatcher = create_default_dispatcher(tmp_path)
     mock_llm = MockLLMClient(
         responses=[
@@ -89,81 +126,60 @@ def test_websocket_streaming_flow(tmp_path: Path) -> None:
 
     app.state.reasoning_loop_factory = custom_loop_factory
 
+    with TestClient(app) as test_client:
+        post_resp = test_client.post("/tasks", json={"task": "Inspect repository"})
+        assert post_resp.status_code == 202
+        task_id = post_resp.json()["task_id"]
+
+        with test_client.websocket_connect(f"/ws?task_id={task_id}") as ws:
+            # Event 1: Thought from step 1
+            msg1 = ws.receive_json()
+            assert msg1["event_type"] == "thought"
+            assert msg1["thought"] == "Need to list directory contents first."
+            assert msg1["task_id"] == task_id
+            assert msg1["version"] == "v1"
+
+            # Event 2: Tool Call from step 1
+            msg2 = ws.receive_json()
+            assert msg2["event_type"] == "tool_call"
+            assert msg2["tool_name"] == "list_dir"
+            assert msg2["task_id"] == task_id
+            assert msg2["version"] == "v1"
+
+            # Event 3: Tool Output from step 1
+            msg3 = ws.receive_json()
+            assert msg3["event_type"] == "tool_output"
+            assert msg3["tool_name"] == "list_dir"
+            assert msg3["task_id"] == task_id
+            assert msg3["success"] is True
+
+            # Event 4: Thought from step 2
+            msg4 = ws.receive_json()
+            assert msg4["event_type"] == "thought"
+            assert msg4["thought"] == "Directory listed. Ready to conclude."
+            assert msg4["task_id"] == task_id
+
+            # Event 5: Task Complete from step 2
+            msg5 = ws.receive_json()
+            assert msg5["event_type"] == "task_complete"
+            assert msg5["final_answer"] == "Task completed successfully."
+            assert msg5["task_id"] == task_id
+            assert msg5["total_steps"] == 2
+
+
+def test_websocket_missing_task_id() -> None:
+    """Verifies WebSocket returns ErrorEvent when task_id query parameter is missing."""
     with (
         TestClient(app) as test_client,
         test_client.websocket_connect("/ws") as ws,
     ):
-        ws.send_json({"task": "Inspect repository"})
-
-        # Event 1: Thought from step 1
-        msg1 = ws.receive_json()
-        assert msg1["event_type"] == "thought"
-        assert msg1["thought"] == "Need to list directory contents first."
-        assert msg1["version"] == "v1"
-
-        # Event 2: Tool Call from step 1
-        msg2 = ws.receive_json()
-        assert msg2["event_type"] == "tool_call"
-        assert msg2["tool_name"] == "list_dir"
-        assert msg2["version"] == "v1"
-
-        # Event 3: Tool Output from step 1
-        msg3 = ws.receive_json()
-        assert msg3["event_type"] == "tool_output"
-        assert msg3["tool_name"] == "list_dir"
-        assert msg3["success"] is True
-
-        # Event 4: Thought from step 2
-        msg4 = ws.receive_json()
-        assert msg4["event_type"] == "thought"
-        assert msg4["thought"] == "Directory listed. Ready to conclude."
-
-        # Event 5: Task Complete from step 2
-        msg5 = ws.receive_json()
-        assert msg5["event_type"] == "task_complete"
-        assert msg5["final_answer"] == "Task completed successfully."
-        assert msg5["total_steps"] == 2
-
-
-def test_websocket_raw_text_message() -> None:
-    """Verifies WebSocket accepts plain string message as task."""
-    mock_llm = MockLLMClient(
-        responses=[
-            {
-                "thought": "Processing raw text task",
-                "final_answer": "Finished raw text task",
-            }
-        ]
-    )
-    app.state.reasoning_loop_factory = lambda: get_default_loop_factory(
-        llm_client_override=mock_llm
-    )
-
-    with (
-        TestClient(app) as test_client,
-        test_client.websocket_connect("/ws") as ws,
-    ):
-        ws.send_text("Simple raw text task")
-        msg1 = ws.receive_json()
-        assert msg1["event_type"] == "thought"
-        msg2 = ws.receive_json()
-        assert msg2["event_type"] == "task_complete"
-
-
-def test_websocket_invalid_message() -> None:
-    """Verifies WebSocket returns ErrorEvent when message format is invalid."""
-    with (
-        TestClient(app) as test_client,
-        test_client.websocket_connect("/ws") as ws,
-    ):
-        ws.send_json({"invalid_key": "no task"})
         msg = ws.receive_json()
         assert msg["event_type"] == "error"
-        assert "Invalid message format" in msg["error"]
+        assert "task_id query parameter is required" in msg["error"]
 
 
 def test_websocket_disconnect_handling(tmp_path: Path) -> None:
-    """Verifies server gracefully handles client disconnect mid-stream."""
+    """Verifies server gracefully handles client disconnect during streaming."""
     dispatcher = create_default_dispatcher(tmp_path)
     mock_llm = MockLLMClient(
         responses=[
@@ -179,19 +195,20 @@ def test_websocket_disconnect_handling(tmp_path: Path) -> None:
         max_steps=5,
     )
 
-    with (
-        TestClient(app) as test_client,
-        test_client.websocket_connect("/ws") as ws,
-    ):
-        ws.send_json({"task": "Quick task"})
-        msg = ws.receive_json()
-        assert msg["event_type"] == "thought"
-        # Client disconnects while session is active
-        ws.close()
+    with TestClient(app) as test_client:
+        post_resp = test_client.post("/tasks", json={"task": "Quick task"})
+        task_id = post_resp.json()["task_id"]
+
+        with test_client.websocket_connect(f"/ws?task_id={task_id}") as ws:
+            msg = ws.receive_json()
+            assert msg["event_type"] == "thought"
+            assert msg["task_id"] == task_id
+            # Client disconnects
+            ws.close()
 
 
 def test_websocket_concurrent_connections(tmp_path: Path) -> None:
-    """Verifies server handles multiple concurrent WebSocket connections."""
+    """Verifies server handles multiple concurrent WebSocket subscribers."""
     dispatcher = create_default_dispatcher(tmp_path)
 
     def make_loop() -> ReasoningLoop:
@@ -207,25 +224,33 @@ def test_websocket_concurrent_connections(tmp_path: Path) -> None:
 
     app.state.reasoning_loop_factory = make_loop
 
-    with (
-        TestClient(app) as test_client,
-        test_client.websocket_connect("/ws?task_id=1") as ws1,
-        test_client.websocket_connect("/ws?task_id=2") as ws2,
-    ):
-        ws1.send_json({"task": "Task 1"})
-        ws2.send_json({"task": "Task 2"})
+    with TestClient(app) as test_client:
+        r1 = test_client.post("/tasks", json={"task": "Task 1"})
+        r2 = test_client.post("/tasks", json={"task": "Task 2"})
+        t1 = r1.json()["task_id"]
+        t2 = r2.json()["task_id"]
 
-        msg1_thought = ws1.receive_json()
-        msg2_thought = ws2.receive_json()
+        with (
+            test_client.websocket_connect(f"/ws?task_id={t1}") as ws1,
+            test_client.websocket_connect(f"/ws?task_id={t2}") as ws2,
+        ):
+            msg1_thought = ws1.receive_json()
+            msg2_thought = ws2.receive_json()
 
-        assert msg1_thought["event_type"] == "thought"
-        assert msg2_thought["event_type"] == "thought"
+            assert msg1_thought["event_type"] == "thought"
+            assert msg1_thought["task_id"] == t1
 
-        msg1_done = ws1.receive_json()
-        msg2_done = ws2.receive_json()
+            assert msg2_thought["event_type"] == "thought"
+            assert msg2_thought["task_id"] == t2
 
-        assert msg1_done["event_type"] == "task_complete"
-        assert msg2_done["event_type"] == "task_complete"
+            msg1_done = ws1.receive_json()
+            msg2_done = ws2.receive_json()
+
+            assert msg1_done["event_type"] == "task_complete"
+            assert msg1_done["task_id"] == t1
+
+            assert msg2_done["event_type"] == "task_complete"
+            assert msg2_done["task_id"] == t2
 
 
 def test_get_default_loop_factory_branches() -> None:
@@ -237,13 +262,13 @@ def test_get_default_loop_factory_branches() -> None:
 
     # 2. With api key configured
     custom_settings = Settings(llm_api_key=SecretStr("sk-test-key-123"))
-    with patch("src.api.routes.websocket.get_settings", return_value=custom_settings):
+    with patch("src.core.worker.get_settings", return_value=custom_settings):
         loop2 = get_default_loop_factory()
         assert loop2.llm_client.__class__.__name__ == "HTTPLLMClient"
 
     # 3. Default without key
     no_key_settings = Settings(llm_api_key=SecretStr(""))
-    with patch("src.api.routes.websocket.get_settings", return_value=no_key_settings):
+    with patch("src.core.worker.get_settings", return_value=no_key_settings):
         loop3 = get_default_loop_factory()
         assert isinstance(loop3.llm_client, MockLLMClient)
 
