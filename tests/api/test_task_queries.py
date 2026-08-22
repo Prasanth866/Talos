@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
 from src.agent.dispatcher import create_default_dispatcher
 from src.agent.llm_client import MockLLMClient
 from src.agent.loop import ReasoningLoop
-from src.core.config import ROOT_DIR
+from src.core.config import ROOT_DIR, Settings
 from src.main import app
 
 
@@ -103,3 +104,29 @@ def test_task_queries_with_worker_execution() -> None:
         assert paginated_resp.status_code == 200
         paginated_list = paginated_resp.json()
         assert len(paginated_list) <= 1
+
+
+def test_queue_full_does_not_persist_rejected_task() -> None:
+    """Verifies that when task queue is full, rejected tasks do not create DB rows."""
+    settings = Settings(task_queue_max_size=1, worker_concurrency=0)
+
+    with (
+        patch("src.main.get_settings", return_value=settings),
+        TestClient(app) as test_client,
+    ):
+        # First task succeeds and fills the queue
+        res1 = test_client.post("/tasks", json={"task": "Accepted task"})
+        assert res1.status_code == 202
+
+        # Second task rejected with 503
+        res2 = test_client.post(
+            "/tasks", json={"task": "Rejected task without DB write"}
+        )
+        assert res2.status_code == 503
+
+        # List all tasks and ensure rejected task was not inserted
+        tasks_resp = test_client.get("/tasks")
+        assert tasks_resp.status_code == 200
+        tasks = tasks_resp.json()
+        assert any(t["task"] == "Accepted task" for t in tasks)
+        assert not any(t["task"] == "Rejected task without DB write" for t in tasks)

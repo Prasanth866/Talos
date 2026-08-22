@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     worker_concurrency: int = 4
     task_queue_max_size: int = 100
     shutdown_drain_timeout_seconds: float = 30.0
+    max_retained_task_events: int = 1000
 
     database_url: str = "sqlite+aiosqlite:///talos.db"
 

@@ -68,6 +68,14 @@ async def submit_task(
                 headers={"Retry-After": "5"},
             )
 
+        if task_manager.queue.full():
+            logger.warning("task_submission_rejected_queue_full", task_id=task_id)
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Task queue is full"},
+                headers={"Retry-After": "5"},
+            )
+
         if task_manager.session_factory is not None:
             async with task_manager.session_factory() as session:
                 await repository.create_task(

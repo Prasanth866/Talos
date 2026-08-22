@@ -204,3 +204,56 @@ async def test_subscribe_unsubscribe_lifecycle() -> None:
 
     await tm.unsubscribe(task_id, q2)
     assert task_id not in tm._subscribers
+
+
+@pytest.mark.asyncio
+async def test_task_events_bounded_retention() -> None:
+    """Verifies that TaskManager evicts oldest completed task events
+    when limit is exceeded.
+    """
+    tm = TaskManager(max_retained_task_events=2)
+
+    t1, t2, t3 = str(uuid4()), str(uuid4()), str(uuid4())
+
+    evt1 = ThoughtEvent(thought="Thought 1", step=1, task_id=t1)
+    evt2 = ThoughtEvent(thought="Thought 2", step=1, task_id=t2)
+    evt3 = ThoughtEvent(thought="Thought 3", step=1, task_id=t3)
+
+    # Broadcast events for t1 and complete t1
+    await tm.broadcast_event(t1, evt1)
+    await tm.broadcast_event(t1, None)
+
+    # Broadcast events for t2 and complete t2
+    await tm.broadcast_event(t2, evt2)
+    await tm.broadcast_event(t2, None)
+
+    assert t1 in tm._task_events
+    assert t2 in tm._task_events
+
+    # Broadcast events for t3 and complete t3 (should evict t1 since limit is 2)
+    await tm.broadcast_event(t3, evt3)
+    await tm.broadcast_event(t3, None)
+
+    assert t1 not in tm._task_events
+    assert t1 not in tm._task_completed
+    assert t2 in tm._task_events
+    assert t3 in tm._task_events
+
+
+@pytest.mark.asyncio
+async def test_prune_task_removes_in_memory_state() -> None:
+    """Verifies that prune_task explicitly removes events and completion status."""
+    tm = TaskManager()
+    task_id = str(uuid4())
+    evt = ThoughtEvent(thought="Thought", step=1, task_id=task_id)
+
+    await tm.broadcast_event(task_id, evt)
+    await tm.broadcast_event(task_id, None)
+
+    assert task_id in tm._task_events
+    assert task_id in tm._task_completed
+
+    await tm.prune_task(task_id)
+
+    assert task_id not in tm._task_events
+    assert task_id not in tm._task_completed

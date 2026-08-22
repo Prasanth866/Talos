@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -80,6 +81,7 @@ class TaskManager:
         settings: Settings | None = None,
         loop_factory: LoopFactory | None = None,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
+        max_retained_task_events: int | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.loop_factory: LoopFactory = loop_factory or (
@@ -91,11 +93,16 @@ class TaskManager:
         )
         self.worker_concurrency: int = self.settings.worker_concurrency
         self.drain_timeout_seconds: float = self.settings.shutdown_drain_timeout_seconds
+        self.max_retained_task_events: int = (
+            max_retained_task_events
+            if max_retained_task_events is not None
+            else self.settings.max_retained_task_events
+        )
         self._shutting_down: bool = False
         self._worker_tasks: list[asyncio.Task[None]] = []
         self._subscribers: dict[str, list[asyncio.Queue[AgentEvent | None]]] = {}
         self._task_events: dict[str, list[AgentEvent]] = {}
-        self._task_completed: dict[str, bool] = {}
+        self._task_completed: OrderedDict[str, bool] = OrderedDict()
         self._subscribers_lock = asyncio.Lock()
         self._active_tasks: set[str] = set()
 
@@ -194,6 +201,9 @@ class TaskManager:
                 self._task_events.setdefault(task_id, []).append(event)
             else:
                 self._task_completed[task_id] = True
+                while len(self._task_completed) > self.max_retained_task_events:
+                    oldest_task_id, _ = self._task_completed.popitem(last=False)
+                    self._task_events.pop(oldest_task_id, None)
 
             subscribers = list(self._subscribers.get(task_id, []))
 
@@ -205,6 +215,12 @@ class TaskManager:
                     "subscriber_queue_full_dropping_event",
                     task_id=task_id,
                 )
+
+    async def prune_task(self, task_id: str) -> None:
+        """Explicitly cleans up in-memory events and completed status for a task."""
+        async with self._subscribers_lock:
+            self._task_events.pop(task_id, None)
+            self._task_completed.pop(task_id, None)
 
     async def _worker(self, worker_id: int) -> None:
         """Worker loop pulling tasks from the queue and running reasoning loops."""
