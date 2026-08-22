@@ -11,9 +11,12 @@ from src.api.routes.health import router as health_router
 from src.api.routes.tasks import router as tasks_router
 from src.api.routes.websocket import router as websocket_router
 from src.core.config import get_settings
+from src.core.database import Database
 from src.core.logging import get_logger, setup_logging
 from src.core.middleware import LoggingAndCorrelationIdMiddleware
 from src.core.worker import TaskManager
+from src.db import repository
+from src.db.models import Base
 
 logger = get_logger(__name__)
 
@@ -24,8 +27,30 @@ async def lifespan(fast_app: FastAPI) -> AsyncGenerator[None]:
     logger.info("application_startup", status="initializing")
     settings = get_settings()
 
+    db: Database = getattr(fast_app.state, "db", None) or Database(
+        settings.database_url
+    )
+    fast_app.state.db = db
+
+    async with db.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with db.session_factory() as session:
+        recovered = await repository.recover_interrupted(session)
+        if recovered > 0:
+            logger.warning(
+                "crash_recovery_completed",
+                interrupted_tasks_marked_failed=recovered,
+            )
+        else:
+            logger.info("crash_recovery_check", status="no_interrupted_tasks")
+
     loop_factory = getattr(fast_app.state, "reasoning_loop_factory", None)
-    task_manager = TaskManager(settings=settings, loop_factory=loop_factory)
+    task_manager = TaskManager(
+        settings=settings,
+        loop_factory=loop_factory,
+        session_factory=db.session_factory,
+    )
     fast_app.state.task_manager = task_manager
 
     async with asyncio.TaskGroup() as task_group:
@@ -39,6 +64,7 @@ async def lifespan(fast_app: FastAPI) -> AsyncGenerator[None]:
         logger.info("application_shutdown", status="draining_workers")
         await task_manager.stop()
 
+    await db.dispose()
     logger.info("application_shutdown", status="stopped")
 
 

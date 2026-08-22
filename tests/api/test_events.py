@@ -8,7 +8,9 @@ from src.api.schemas.events import (
     HealthResponse,
     ReadinessResponse,
     TaskCompleteEvent,
+    TaskDetailResponse,
     TaskResponse,
+    TaskStatus,
     TaskSubmitRequest,
     ThoughtEvent,
     ToolCallEvent,
@@ -153,5 +155,21 @@ def test_http_response_schemas() -> None:
 
     task_resp = TaskResponse(task_id="task_1", ws_url="/ws?task_id=task_1")
     assert task_resp.task_id == "task_1"
-    assert task_resp.status == "queued"
+    assert task_resp.status == TaskStatus.PENDING
     assert task_resp.ws_url == "/ws?task_id=task_1"
+
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    detail_resp = TaskDetailResponse(
+        task_id="task_1",
+        task="Test task",
+        status=TaskStatus.COMPLETED,
+        result="Success",
+        created_at=now,
+        updated_at=now,
+    )
+    assert detail_resp.task_id == "task_1"
+    assert detail_resp.status == TaskStatus.COMPLETED
+    assert detail_resp.result == "Success"
+    assert detail_resp.total_tokens == 0

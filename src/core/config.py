@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     task_queue_max_size: int = 100
     shutdown_drain_timeout_seconds: float = 30.0
 
+    database_url: str = "sqlite+aiosqlite:///talos.db"
+
     @model_validator(mode="after")
     def _validate_settings(self) -> Settings:
         if self.environment is Environment.PRODUCTION and self.debug:

@@ -29,3 +29,9 @@ htmlcov/
 # Secrets & Local Configs
 .env
 *.env.local
+
+# Databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3

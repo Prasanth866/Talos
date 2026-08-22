@@ -1,6 +1,6 @@
 # Talos
 
-Autonomous software engineering agent framework featuring a tool-use reasoning loop, bounded async worker queues with structured concurrency, graceful shutdown, defensive sandboxing, and real-time WebSocket event streaming.
+Autonomous software engineering agent framework featuring a tool-use reasoning loop, bounded async worker queues with structured concurrency, graceful shutdown, persistent task state with crash recovery, defensive sandboxing, and real-time WebSocket event streaming.
 
 ---
 
@@ -8,6 +8,9 @@ Autonomous software engineering agent framework featuring a tool-use reasoning l
 
 - **Autonomous Reasoning Loop**: Step-by-step ReAct-style agent execution loop (`ReasoningLoop`) with dynamic tool dispatching, observation truncation, and token/cost tracking.
 - **Async Worker Queue & Worker Pool**: Structured concurrency managed via `asyncio.TaskGroup` over a bounded `asyncio.Queue` with configurable worker concurrency.
+- **Persistent Task Store**: Async database persistence using SQLAlchemy and Alembic, tracking complete task lifecycles (`PENDING -> RUNNING -> COMPLETED / FAILED`), metrics, and final answers.
+- **Crash Recovery**: Automatic startup recovery identifying any interrupted `RUNNING` tasks from crashes or abrupt server kills and marking them as `FAILED`.
+- **Task Query & Filtering**: REST endpoints (`GET /tasks/{id}`, `GET /tasks?status=...`) with pagination support (`limit`, `offset`).
 - **Backpressure & Load Shedding**: Explicit HTTP `503 Service Unavailable` with `Retry-After` headers when the task queue reaches maximum capacity or during shutdown.
 - **Graceful Shutdown**: Intercepts `SIGTERM` / application lifespan exit, safely stops accepting new submissions, and drains in-flight tasks before termination.
 - **Correlation IDs**: Full UUID `task_id` propagation threaded through every structured log line via `structlog` contextvars and all WebSocket stream events.
@@ -32,6 +35,12 @@ cd Talos
 uv sync
 ```
 
+### Database Migrations
+```bash
+# Apply migrations to initialize or upgrade the database
+uv run alembic upgrade head
+```
+
 ### Environment Configuration
 Copy `.env.example` to `.env` and configure settings as needed:
 ```bash
@@ -39,6 +48,7 @@ cp .env.example .env
 ```
 
 Key environment variables:
+- `DATABASE_URL`: Database connection URL (default: `sqlite+aiosqlite:///talos.db`).
 - `LLM_API_KEY`: API key for LLM provider (optional in development; uses Mock LLM if empty).
 - `LLM_BASE_URL`: Base URL for OpenAI-compatible LLM endpoint (default: `https://api.groq.com/openai/v1`).
 - `LLM_MODEL`: Model name (default: `openai/gpt-oss-120b`).
@@ -68,7 +78,7 @@ curl -X POST http://localhost:8000/tasks \
 ```json
 {
   "task_id": "c6a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c",
-  "status": "queued",
+  "status": "PENDING",
   "ws_url": "/ws?task_id=c6a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c"
 }
 ```
@@ -85,6 +95,15 @@ ws.onmessage = (event) => {
 };
 ```
 
+### 3. Query Task Status and Results
+```bash
+# Fetch single task details
+curl http://localhost:8000/tasks/c6a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c
+
+# Filter completed tasks
+curl "http://localhost:8000/tasks?status=COMPLETED&limit=10"
+```
+
 ---
 
 ## Running Tests & Quality Checks
@@ -94,7 +113,7 @@ ws.onmessage = (event) => {
 uv run pytest --cov=src --cov-report=term-missing
 
 # Run strict type checking
-uv run mypy src tests
+uv run mypy src tests migrations
 
 # Run linter & code formatter checks
 uv run ruff check .
@@ -109,9 +128,11 @@ uv run ruff format --check .
 Talos/
 ├── .env.example                  # Environment variable template
 ├── .pre-commit-config.yaml       # Pre-commit hooks (ruff, mypy, pytest)
+├── alembic.ini                   # Alembic database migration configuration
+├── migrations/                   # Asynchronous database migration versions
 ├── pyproject.toml                # Project metadata & tool configurations
 ├── src/
-│   ├── main.py                   # FastAPI app entrypoint & lifespan management
+│   ├── main.py                   # FastAPI app, database lifespan & crash recovery
 │   ├── agent/
 │   │   ├── dispatcher.py         # Tool registry and execution dispatcher
 │   │   ├── llm_client.py         # HTTP (OpenAI-compatible) and Mock LLM clients
@@ -124,15 +145,19 @@ Talos/
 │   │   ├── exception_handlers.py # Standardized JSON error response handlers
 │   │   ├── routes/
 │   │   │   ├── health.py         # /health (liveness) & /readiness endpoints
-│   │   │   ├── tasks.py          # POST /tasks submission endpoint
+│   │   │   ├── tasks.py          # POST /tasks, GET /tasks/{id}, GET /tasks
 │   │   │   └── websocket.py      # /ws subscriber streaming endpoint
 │   │   └── schemas/
-│   │       └── events.py         # Versioned streaming event schemas with task_id
+│   │       └── events.py         # Streaming events & TaskDetailResponse schemas
 │   ├── core/
 │   │   ├── config.py             # Pydantic Settings & environment validation
+│   │   ├── database.py           # Async SQLAlchemy engine & session factory
 │   │   ├── logging.py            # Structlog configuration with contextvars
 │   │   ├── middleware.py         # Correlation ID & request duration middleware
 │   │   └── worker.py             # TaskManager, TaskGroup worker pool & graceful drain
+│   ├── db/
+│   │   ├── models.py             # Task SQLAlchemy ORM model & TaskStatus enum
+│   │   └── repository.py         # Pure-function asynchronous data access layer
 │   └── tools/
 │       ├── exceptions.py         # Custom ToolError exception hierarchy
 │       ├── filesystem.py         # Sandboxed FileSystemTool & path safety
@@ -141,8 +166,9 @@ Talos/
 └── tests/
     ├── conftest.py               # Shared test fixtures & client lifecycle
     ├── agent/                    # Agent loop, dispatcher, LLM & retry tests
-    ├── api/                      # API endpoint, WebSocket & schema tests
+    ├── api/                      # API endpoint, WebSocket, task queries & schema tests
     ├── core/                     # Config, logging, middleware & worker pool tests
+    ├── db/                       # Repository and crash recovery test suites
     └── tools/                    # File system & shell tool test suites
 ```
 

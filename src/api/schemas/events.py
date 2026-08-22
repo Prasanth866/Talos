@@ -6,6 +6,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from src.db.models import TaskStatus as TaskStatus
+
 
 class EventType(StrEnum):
     THOUGHT = "thought"
@@ -94,8 +96,28 @@ class TaskResponse(BaseModel):
     """Response returned upon submitting a task."""
 
     task_id: str
-    status: str = "queued"
+    status: TaskStatus = TaskStatus.PENDING
     ws_url: str
+
+
+class TaskDetailResponse(BaseModel):
+    """Detailed task representation returned by query endpoints."""
+
+    task_id: str
+    task: str
+    status: TaskStatus
+    result: str | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    duration_seconds: float = 0.0
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class HealthResponse(BaseModel):

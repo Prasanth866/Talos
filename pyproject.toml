@@ -5,8 +5,11 @@ description = "Autonomous software engineering agent with tool-use reasoning loo
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "aiosqlite>=0.21.0",
+    "alembic>=1.14.1",
     "fastapi[standard]>=0.141.1",
     "pydantic-settings>=2.15.0",
+    "sqlalchemy[asyncio]>=2.0.38",
     "starlette>=1.6.0",
     "structlog>=26.1.0",
     "tenacity>=9.1.4",

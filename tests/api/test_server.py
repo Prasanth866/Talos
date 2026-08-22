@@ -54,7 +54,7 @@ def test_submit_task_success(client: TestClient) -> None:
     response = client.post("/tasks", json=payload)
     assert response.status_code == 202
     data = response.json()
-    assert data["status"] == "queued"
+    assert data["status"] == "PENDING"
     task_uuid = uuid.UUID(data["task_id"])
     assert str(task_uuid) == data["task_id"]
     assert f"/ws?task_id={data['task_id']}" == data["ws_url"]

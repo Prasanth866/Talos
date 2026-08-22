@@ -7,13 +7,16 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.agent.dispatcher import create_default_dispatcher
 from src.agent.llm_client import BaseLLMClient, HTTPLLMClient, MockLLMClient
 from src.agent.loop import ReasoningLoop
+from src.agent.models import TrajectoryStatus
 from src.api.schemas.events import AgentEvent, ErrorEvent
 from src.core.config import ROOT_DIR, Settings, get_settings
 from src.core.logging import get_logger
+from src.db import repository
 
 logger = get_logger(__name__)
 
@@ -76,11 +79,13 @@ class TaskManager:
         self,
         settings: Settings | None = None,
         loop_factory: LoopFactory | None = None,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.loop_factory: LoopFactory = loop_factory or (
             lambda: create_default_loop(self.settings)
         )
+        self.session_factory = session_factory
         self.queue: asyncio.Queue[TaskItem | None] = asyncio.Queue(
             maxsize=self.settings.task_queue_max_size
         )
@@ -216,17 +221,45 @@ class TaskManager:
             structlog.contextvars.bind_contextvars(task_id=task_id)
             logger.info("worker_task_started", worker_id=worker_id, task_id=task_id)
 
+            if self.session_factory is not None:
+                async with self.session_factory() as session:
+                    await repository.mark_running(session, task_id)
+
             async def on_event(evt: AgentEvent, tid: str = task_id) -> None:
                 await self.broadcast_event(tid, evt)
 
             try:
                 loop = self.loop_factory()
-                await loop.run(
+                trajectory = await loop.run(
                     task=item.task,
                     metadata=item.metadata,
                     on_event=on_event,
                     task_id=task_id,
                 )
+
+                if self.session_factory is not None:
+                    async with self.session_factory() as session:
+                        if trajectory.status == TrajectoryStatus.COMPLETED:
+                            await repository.mark_completed(
+                                session=session,
+                                task_id=task_id,
+                                result=trajectory.final_answer,
+                                prompt_tokens=trajectory.total_tokens.prompt_tokens,
+                                completion_tokens=trajectory.total_tokens.completion_tokens,
+                                total_tokens=trajectory.total_tokens.total_tokens,
+                                total_cost_usd=trajectory.total_cost_usd,
+                                duration_seconds=trajectory.total_duration_seconds,
+                            )
+                        else:
+                            await repository.mark_failed(
+                                session=session,
+                                task_id=task_id,
+                                error=(
+                                    trajectory.error
+                                    or f"Task failed with status: {trajectory.status}"
+                                ),
+                            )
+
                 logger.info(
                     "worker_task_completed",
                     worker_id=worker_id,
@@ -238,6 +271,13 @@ class TaskManager:
                     worker_id=worker_id,
                     task_id=task_id,
                 )
+                if self.session_factory is not None:
+                    async with self.session_factory() as session:
+                        await repository.mark_failed(
+                            session=session,
+                            task_id=task_id,
+                            error="Worker task was cancelled",
+                        )
                 raise
             except Exception as exc:
                 logger.exception(
@@ -246,6 +286,13 @@ class TaskManager:
                     task_id=task_id,
                     error=str(exc),
                 )
+                if self.session_factory is not None:
+                    async with self.session_factory() as session:
+                        await repository.mark_failed(
+                            session=session,
+                            task_id=task_id,
+                            error=f"Worker processing error: {exc}",
+                        )
                 err_event = ErrorEvent(
                     error=f"Worker processing error: {exc}",
                     task_id=task_id,
