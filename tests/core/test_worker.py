@@ -113,9 +113,13 @@ async def test_worker_binds_task_id_to_structlog_contextvars() -> None:
     captured_contextvars: list[dict[str, Any]] = []
 
     class CapturingLLM(MockLLMClient):
-        async def generate_response(self, messages: list[Any]) -> Any:
+        async def generate_response(
+            self,
+            messages: list[Any],
+            tools: list[dict[str, Any]] | None = None,
+        ) -> Any:
             captured_contextvars.append(dict(structlog.contextvars.get_contextvars()))
-            return await super().generate_response(messages)
+            return await super().generate_response(messages, tools=tools)
 
     mock_llm = CapturingLLM(
         responses=[
@@ -149,11 +153,15 @@ async def test_graceful_shutdown_drains_inflight_tasks() -> None:
     completed_tasks: list[str] = []
 
     class SlowLLM(MockLLMClient):
-        async def generate_response(self, messages: list[Any]) -> Any:
+        async def generate_response(
+            self,
+            messages: list[Any],
+            tools: list[dict[str, Any]] | None = None,
+        ) -> Any:
             await asyncio.sleep(0.05)  # Simulate in-flight work
             cv = structlog.contextvars.get_contextvars()
             completed_tasks.append(cv.get("task_id", ""))
-            return await super().generate_response(messages)
+            return await super().generate_response(messages, tools=tools)
 
     mock_llm = SlowLLM(
         responses=[

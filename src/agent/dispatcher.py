@@ -73,6 +73,25 @@ class ToolDispatcher:
             )
         return "\n".join(docs)
 
+    def get_openai_tools_schema(self) -> list[dict[str, Any]]:
+        """Generates OpenAI-compatible function calling schemas for registered tools."""
+        tools = []
+        for tool in self._tools.values():
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": (
+                            tool.parameters_schema
+                            or {"type": "object", "properties": {}}
+                        ),
+                    },
+                }
+            )
+        return tools
+
     async def execute_tool(self, tool_call: ToolCall) -> ToolResult:
         """Dispatches a tool call safely, returning a structured ToolResult."""
         start_time = time.perf_counter()

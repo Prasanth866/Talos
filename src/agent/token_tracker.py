@@ -10,6 +10,12 @@ logger = structlog.get_logger(__name__)
 
 MODEL_PRICING: dict[str, CostRates] = {
     # Groq / Open Source
+    "llama-3.3-70b-versatile": CostRates(
+        prompt_cost_per_1m=0.59, completion_cost_per_1m=0.79
+    ),
+    "llama-3.1-8b-instant": CostRates(
+        prompt_cost_per_1m=0.05, completion_cost_per_1m=0.08
+    ),
     "openai/gpt-oss-120b": CostRates(
         prompt_cost_per_1m=0.15, completion_cost_per_1m=0.60
     ),

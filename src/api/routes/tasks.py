@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -163,3 +163,37 @@ async def list_tasks(
             offset=offset,
         )
         return [_to_task_detail_response(t) for t in tasks]
+
+
+@router.delete("/{task_id}", status_code=200)
+async def delete_task(
+    task_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """Deletes a single task by ID from the database and prunes in-memory state."""
+    task_manager: TaskManager | None = getattr(request.app.state, "task_manager", None)
+    if task_manager is None or task_manager.session_factory is None:
+        raise HTTPException(status_code=503, detail="Database service unavailable")
+
+    async with task_manager.session_factory() as session:
+        deleted = await repository.delete_task(session, task_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+
+    await task_manager.prune_task(task_id)
+    return {"status": "deleted", "task_id": task_id}
+
+
+@router.delete("", status_code=200)
+async def clear_all_tasks(
+    request: Request,
+) -> dict[str, Any]:
+    """Clears all tasks from the database."""
+    task_manager: TaskManager | None = getattr(request.app.state, "task_manager", None)
+    if task_manager is None or task_manager.session_factory is None:
+        raise HTTPException(status_code=503, detail="Database service unavailable")
+
+    async with task_manager.session_factory() as session:
+        count = await repository.clear_tasks(session)
+
+    return {"status": "cleared", "deleted_count": count}

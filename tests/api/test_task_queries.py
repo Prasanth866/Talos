@@ -130,3 +130,39 @@ def test_queue_full_does_not_persist_rejected_task() -> None:
         tasks = tasks_resp.json()
         assert any(t["task"] == "Accepted task" for t in tasks)
         assert not any(t["task"] == "Rejected task without DB write" for t in tasks)
+
+
+def test_delete_task_and_clear_all(client: TestClient) -> None:
+    """Verifies DELETE /tasks/{id} and DELETE /tasks endpoints."""
+    # 1. Create 2 tasks
+    res1 = client.post("/tasks", json={"task": "Task to delete"})
+    assert res1.status_code == 202
+    t1 = res1.json()["task_id"]
+
+    res2 = client.post("/tasks", json={"task": "Task to remain"})
+    assert res2.status_code == 202
+    t2 = res2.json()["task_id"]
+    assert t2 is not None
+
+    # 2. Delete single task
+    del_res = client.delete(f"/tasks/{t1}")
+    assert del_res.status_code == 200
+    assert del_res.json()["status"] == "deleted"
+
+    # Verify t1 is gone
+    get_res = client.get(f"/tasks/{t1}")
+    assert get_res.status_code == 404
+
+    # 3. Delete non-existent task returns 404
+    del_404 = client.delete("/tasks/non-existent-uuid")
+    assert del_404.status_code == 404
+
+    # 4. Clear all tasks
+    clear_res = client.delete("/tasks")
+    assert clear_res.status_code == 200
+    assert clear_res.json()["status"] == "cleared"
+
+    # List tasks should be empty
+    list_res = client.get("/tasks")
+    assert list_res.status_code == 200
+    assert len(list_res.json()) == 0

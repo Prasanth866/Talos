@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import desc, select, update
+from sqlalchemy import delete, desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import Task, TaskStatus
@@ -133,6 +133,22 @@ async def recover_interrupted(session: AsyncSession) -> int:
             updated_at=now,
         )
     )
+    result = await session.execute(stmt)
+    await session.commit()
+    return int(getattr(result, "rowcount", 0))
+
+
+async def delete_task(session: AsyncSession, task_id: str) -> bool:
+    """Deletes a single task from the database by ID."""
+    stmt = delete(Task).where(Task.id == task_id)
+    result = await session.execute(stmt)
+    await session.commit()
+    return int(getattr(result, "rowcount", 0)) > 0
+
+
+async def clear_tasks(session: AsyncSession) -> int:
+    """Deletes all tasks from the database."""
+    stmt = delete(Task)
     result = await session.execute(stmt)
     await session.commit()
     return int(getattr(result, "rowcount", 0))

@@ -15,11 +15,11 @@ DEFAULT_AGENT_SYSTEM_PROMPT = (
     "   to verify your changes fixed the issue without regressions.\n"
     "4. **Discipline & Efficiency**: Do not make unnecessary tool calls.\n"
     "5. **Sandbox Respect**: All paths and commands operate in the sandbox.\n\n"
-    "### Response Format:\n"
-    "You MUST format your entire response as a single valid JSON object with\n"
-    "NO preamble or extra text outside the JSON.\n\n"
-    "When executing a tool:\n"
-    "```json\n"
+    "### Required JSON Output Format:\n"
+    "You must respond ONLY with a single valid raw JSON object.\n"
+    "Do NOT wrap in markdown code blocks or backticks.\n"
+    "Start your response immediately with '{' and end with '}'.\n\n"
+    "JSON format when executing a tool:\n"
     "{\n"
     '  "thought": "<Brief reasoning on observations, plan, and rationale>",\n'
     '  "tool_call": {\n'
@@ -28,15 +28,12 @@ DEFAULT_AGENT_SYSTEM_PROMPT = (
     '      "<argument_name>": "<value>"\n'
     "    }\n"
     "  }\n"
-    "}\n"
-    "```\n\n"
-    "When completed and verified:\n"
-    "```json\n"
+    "}\n\n"
+    "JSON format when finished:\n"
     "{\n"
     '  "thought": "<Summary of findings, fix applied, and verification>",\n'
     '  "final_answer": "<Detailed description of resolution and verification>"\n'
-    "}\n"
-    "```\n\n"
+    "}\n\n"
     "### Available Tools:\n"
     "<<TOOLS_DOCUMENTATION>>\n"
 )

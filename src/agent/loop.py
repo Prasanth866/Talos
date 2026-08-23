@@ -83,6 +83,7 @@ class ReasoningLoop:
                     )
 
         tools_doc = self.dispatcher.get_tools_documentation()
+        tools_schema = self.dispatcher.get_openai_tools_schema()
         system_prompt = build_system_prompt(
             tools_documentation=tools_doc,
             custom_instructions=self.custom_system_instructions,
@@ -104,7 +105,13 @@ class ReasoningLoop:
             step_start = time.perf_counter()
 
             try:
-                llm_response = await self.llm_client.generate_response(messages)
+                try:
+                    llm_response = await self.llm_client.generate_response(
+                        messages=messages,
+                        tools=tools_schema if tools_schema else None,
+                    )
+                except TypeError:
+                    llm_response = await self.llm_client.generate_response(messages)
             except Exception as exc:
                 duration = time.perf_counter() - start_time
                 trajectory.status = TrajectoryStatus.FAILED

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -56,16 +55,15 @@ async def lifespan(fast_app: FastAPI) -> AsyncGenerator[None]:
     )
     fast_app.state.task_manager = task_manager
 
-    async with asyncio.TaskGroup() as task_group:
-        task_manager.start(task_group)
-        logger.info(
-            "worker_pool_started",
-            workers=settings.worker_concurrency,
-            queue_capacity=settings.task_queue_max_size,
-        )
-        yield
-        logger.info("application_shutdown", status="draining_workers")
-        await task_manager.stop()
+    task_manager.start()
+    logger.info(
+        "worker_pool_started",
+        workers=settings.worker_concurrency,
+        queue_capacity=settings.task_queue_max_size,
+    )
+    yield
+    logger.info("application_shutdown", status="draining_workers")
+    await task_manager.stop()
 
     await db.dispose()
     logger.info("application_shutdown", status="stopped")

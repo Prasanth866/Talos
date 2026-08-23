@@ -166,12 +166,10 @@ class TaskManager:
         """Subscribes to events for a specific task_id, replaying existing history."""
         sub_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
         async with self._subscribers_lock:
-            # Replay any already-emitted events
             for past_event in self._task_events.get(task_id, []):
                 sub_queue.put_nowait(past_event)
 
             if self._task_completed.get(task_id, False):
-                # Task already finished; emit sentinel
                 sub_queue.put_nowait(None)
             else:
                 self._subscribers.setdefault(task_id, []).append(sub_queue)
@@ -320,13 +318,19 @@ class TaskManager:
                 self.queue.task_done()
                 structlog.contextvars.unbind_contextvars("task_id")
 
-    def start(self, task_group: asyncio.TaskGroup) -> None:
-        """Launches worker tasks inside the provided TaskGroup."""
+    def start(self, task_group: asyncio.TaskGroup | None = None) -> None:
+        """Launches worker tasks inside TaskGroup or via asyncio.create_task."""
         for i in range(self.worker_concurrency):
-            task = task_group.create_task(
-                self._worker(worker_id=i + 1),
-                name=f"worker-{i + 1}",
-            )
+            if task_group is not None:
+                task = task_group.create_task(
+                    self._worker(worker_id=i + 1),
+                    name=f"worker-{i + 1}",
+                )
+            else:
+                task = asyncio.create_task(
+                    self._worker(worker_id=i + 1),
+                    name=f"worker-{i + 1}",
+                )
             self._worker_tasks.append(task)
         logger.info(
             "worker_pool_started",
@@ -338,8 +342,9 @@ class TaskManager:
         """Initiates graceful shutdown:
 
         1. Mark as shutting down (rejecting new tasks)
-        2. Enqueue sentinel None values for all workers
-        3. Wait for tasks to drain up to drain_timeout_seconds
+        2. Unblock all WebSocket subscriber queues
+        3. Enqueue sentinel None values for all workers
+        4. Wait for worker tasks to drain up to drain_timeout_seconds
         """
         self._shutting_down = True
         logger.info(
@@ -351,19 +356,30 @@ class TaskManager:
         if self.worker_concurrency == 0:
             return
 
-        for _ in range(self.worker_concurrency):
-            await self.queue.put(None)
+        async with self._subscribers_lock:
+            for sub_list in self._subscribers.values():
+                for sub_queue in sub_list:
+                    with contextlib.suppress(Exception):
+                        sub_queue.put_nowait(None)
 
-        try:
-            await asyncio.wait_for(
-                self.queue.join(),
+        for _ in range(self.worker_concurrency):
+            with contextlib.suppress(Exception):
+                self.queue.put_nowait(None)
+
+        if self._worker_tasks:
+            _done, pending = await asyncio.wait(
+                self._worker_tasks,
                 timeout=self.drain_timeout_seconds,
             )
-            logger.info("worker_pool_drained_successfully")
-        except TimeoutError:
-            logger.error(
-                "worker_pool_drain_timed_out",
-                timeout_seconds=self.drain_timeout_seconds,
-                remaining_tasks=self.queue_size,
-                active_tasks=self.active_task_count,
-            )
+            if pending:
+                logger.warning(
+                    "worker_pool_drain_timed_out_cancelling",
+                    timeout_seconds=self.drain_timeout_seconds,
+                    pending_workers=len(pending),
+                )
+                for worker_task in pending:
+                    worker_task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+
+        self._worker_tasks.clear()
+        logger.info("worker_pool_stopped_successfully")

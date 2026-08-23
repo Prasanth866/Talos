@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import time
@@ -83,8 +84,18 @@ def parse_llm_response_content(
     tool_call: ToolCall | None = None
 
     if isinstance(tool_call_dict, dict):
-        tool_name = tool_call_dict.get("tool_name") or tool_call_dict.get("tool") or ""
-        arguments = tool_call_dict.get("arguments") or tool_call_dict.get("args") or {}
+        tool_name = (
+            tool_call_dict.get("tool_name")
+            or tool_call_dict.get("name")
+            or tool_call_dict.get("tool")
+            or ""
+        )
+        arguments = (
+            tool_call_dict.get("arguments")
+            or tool_call_dict.get("args")
+            or tool_call_dict.get("parameters")
+            or {}
+        )
         if tool_name:
             tool_call = ToolCall(tool_name=str(tool_name), arguments=dict(arguments))
 
@@ -102,7 +113,11 @@ class BaseLLMClient(ABC):
     """Abstract interface for LLM clients."""
 
     @abstractmethod
-    async def generate_response(self, messages: list[Message]) -> LLMResponse:
+    async def generate_response(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> LLMResponse:
         """Sends messages to the LLM and returns a structured LLMResponse."""
         pass
 
@@ -123,7 +138,11 @@ class MockLLMClient(BaseLLMClient):
     def add_response(self, response: str | dict[str, Any] | Exception) -> None:
         self.responses.append(response)
 
-    async def generate_response(self, messages: list[Message]) -> LLMResponse:
+    async def generate_response(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> LLMResponse:
         self.call_history.append(messages)
         start_time = time.perf_counter()
 
@@ -221,15 +240,41 @@ class HTTPLLMClient(BaseLLMClient):
         url = f"{self.base_url}/chat/completions"
         client = await self._get_http_client()
         response = await client.post(url, json=payload, headers=headers)
-        response.raise_for_status()
+        if response.is_error:
+            error_message = response.text
+            with contextlib.suppress(Exception):
+                err_data = response.json()
+                if isinstance(err_data, dict) and "error" in err_data:
+                    err_obj = err_data["error"]
+                    if isinstance(err_obj, dict):
+                        error_message = err_obj.get("message") or str(err_obj)
+                    else:
+                        error_message = str(err_obj)
+            logger.error(
+                "llm_api_http_error",
+                status_code=response.status_code,
+                error=error_message,
+                model=self.model,
+            )
+            raise RuntimeError(
+                f"LLM API error ({response.status_code}): {error_message}"
+            )
+
         return response.json()  # type: ignore[no-any-return]
 
-    async def generate_response(self, messages: list[Message]) -> LLMResponse:
-        payload = {
+    async def generate_response(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> LLMResponse:
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": self._format_messages_payload(messages),
             "temperature": 0.1,
         }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
 
         start_time = time.perf_counter()
 
@@ -246,9 +291,41 @@ class HTTPLLMClient(BaseLLMClient):
         if not choices:
             raise ValueError("No choices returned from LLM API response.")
 
-        content = choices[0].get("message", {}).get("content", "")
+        msg = choices[0].get("message", {})
+        content = msg.get("content") or ""
+        reasoning = msg.get("reasoning") or ""
+
         raw_usage = data.get("usage")
         call_usage = self.token_tracker.record_from_response(raw_usage)
+
+        # 1. Handle native OpenAI tool_calls
+        tool_calls = msg.get("tool_calls")
+        if tool_calls and isinstance(tool_calls, list):
+            first_tc = tool_calls[0]
+            func = first_tc.get("function", {})
+            fn_name = func.get("name", "")
+            raw_args = func.get("arguments", "{}")
+            if isinstance(raw_args, str):
+                try:
+                    fn_args = json.loads(raw_args)
+                except Exception:
+                    fn_args = {}
+            else:
+                fn_args = raw_args or {}
+
+            thought = reasoning or "Executing tool action."
+            return LLMResponse(
+                thought=thought,
+                tool_call=ToolCall(tool_name=fn_name, arguments=fn_args),
+                final_answer=None,
+                raw_content=json.dumps(first_tc),
+                token_usage=call_usage,
+                latency_seconds=latency,
+            )
+
+        # 2. Fall back to reasoning if content is empty
+        if not content and reasoning:
+            content = reasoning
 
         return parse_llm_response_content(
             content=content,
