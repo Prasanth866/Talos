@@ -108,3 +108,11 @@ if static_dir.is_dir():
     @app.get("/", include_in_schema=False)
     async def serve_frontend() -> FileResponse:
         return FileResponse(static_dir / "index.html")
+
+    @app.get("/style.css", include_in_schema=False)
+    async def serve_style_css() -> FileResponse:
+        return FileResponse(static_dir / "style.css")
+
+    @app.get("/app.js", include_in_schema=False)
+    async def serve_app_js() -> FileResponse:
+        return FileResponse(static_dir / "app.js")
