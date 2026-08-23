@@ -5,9 +5,16 @@
 (function () {
   'use strict';
 
+  if (window.__TALOS_AGENT_INITIALIZED__) return;
+  window.__TALOS_AGENT_INITIALIZED__ = true;
+
   // --- API & WEBSOCKET BASE PATH RESOLUTION ---
-  const API_BASE = (location.protocol === 'http:' || location.protocol === 'https:') ? '' : 'http://localhost:8000';
-  const WS_BASE = (location.protocol === 'https:') ? `wss://${location.host}` : (location.protocol === 'http:') ? `ws://${location.host}` : 'ws://localhost:8000';
+  // When served from Live Server (e.g. port 5500) or file://, target the Talos backend on port 8000
+  const isBackendOrigin = (location.port === '8000');
+  const API_BASE = isBackendOrigin ? '' : 'http://127.0.0.1:8000';
+  const WS_BASE = isBackendOrigin
+    ? (location.protocol === 'https:' ? `wss://${location.host}` : `ws://${location.host}`)
+    : 'ws://127.0.0.1:8000';
 
   // --- STATE ---
   let activeTaskId = null;
