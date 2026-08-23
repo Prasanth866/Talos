@@ -303,8 +303,8 @@ def test_failed_task_streams_error_and_persists_failure(tmp_path: Path) -> None:
 
 
 def test_frontend_static_files_served(client: TestClient) -> None:
-    """Verifies that the compiled React frontend is served at GET /."""
+    """Verifies that the frontend is served at GET /."""
     response = client.get("/")
     assert response.status_code == 200
     assert "<!doctype html>" in response.text.lower()
-    assert "Talos Agent Observer" in response.text
+    assert "Talos" in response.text

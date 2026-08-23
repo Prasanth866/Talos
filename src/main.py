@@ -97,14 +97,14 @@ app.include_router(health_router)
 app.include_router(tasks_router)
 app.include_router(websocket_router)
 
-frontend_dist = ROOT_DIR / "frontend" / "dist"
-if frontend_dist.is_dir():
+static_dir = ROOT_DIR / "static"
+if static_dir.is_dir():
     app.mount(
-        "/assets",
-        StaticFiles(directory=frontend_dist / "assets"),
-        name="assets",
+        "/static",
+        StaticFiles(directory=static_dir),
+        name="static",
     )
 
     @app.get("/", include_in_schema=False)
     async def serve_frontend() -> FileResponse:
-        return FileResponse(frontend_dist / "index.html")
+        return FileResponse(static_dir / "index.html")

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Talos — Autonomous AI Engineering Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-name">Talos</span>
+            <span class="brand-tag">AGENT</span>
+          </div>
+        </div>
+        <button type="button" class="btn-icon" id="btn-new-task" title="New Task">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- History Header & Actions -->
+      <div class="history-section-header">
+        <span class="section-title">Recent Tasks</span>
+        <div class="history-actions">
+          <button type="button" class="text-btn" id="btn-clear-history" title="Clear all history">Clear</button>
+          <button type="button" class="btn-icon-sm" id="btn-refresh-history" title="Refresh">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Search & Filter Bar -->
+      <div class="history-filter-box">
+        <input type="text" id="history-search" class="input-search" placeholder="Search tasks..." />
+      </div>
+
+      <!-- Task History List -->
+      <div class="history-list" id="history-list">
+        <div class="history-loading">Loading tasks...</div>
+      </div>
+
+      <!-- Sidebar Footer -->
+      <div class="sidebar-footer">
+        <div class="connection-status" id="connection-status">
+          <span class="status-dot disconnected"></span>
+          <span class="status-text">Disconnected</span>
+        </div>
+        <span class="version-text">v0.1.0</span>
+      </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main class="main-content">
+      <!-- Top Navigation Bar -->
+      <header class="top-nav">
+        <div class="top-nav-left">
+          <button type="button" class="btn-icon toggle-sidebar-btn" id="btn-toggle-sidebar" title="Toggle Sidebar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <line x1="9" y1="3" x2="9" y2="21"/>
+            </svg>
+          </button>
+          <div class="current-task-info">
+            <span class="task-title-display" id="task-title-display">New Autonomous Session</span>
+            <span class="task-id-badge" id="task-id-badge">IDLE</span>
+          </div>
+        </div>
+
+        <div class="top-nav-right">
+          <!-- Metrics HUD -->
+          <div class="metrics-bar" id="metrics-bar">
+            <div class="metric-pill">
+              <span class="metric-key">Steps</span>
+              <span class="metric-val" id="metric-steps">0</span>
+            </div>
+            <div class="metric-pill">
+              <span class="metric-key">Tokens</span>
+              <span class="metric-val" id="metric-tokens">0</span>
+            </div>
+            <div class="metric-pill">
+              <span class="metric-key">Cost</span>
+              <span class="metric-val highlight-cost" id="metric-cost">$0.00000</span>
+            </div>
+            <div class="metric-pill">
+              <span class="metric-key">Duration</span>
+              <span class="metric-val" id="metric-duration">0.0s</span>
+            </div>
+          </div>
+
+          <!-- View Switcher -->
+          <div class="view-toggle-group">
+            <button type="button" class="view-btn active" data-view="split">Split</button>
+            <button type="button" class="view-btn" data-view="stream">Agent</button>
+            <button type="button" class="view-btn" data-view="terminal">Terminal</button>
+          </div>
+
+          <button type="button" class="btn-icon" id="btn-export-json" title="Export Trajectory JSON">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Center Workspace (Agent Stream + Terminal) -->
+      <div class="workspace-body" id="workspace-body">
+        <!-- Agent Stream Column -->
+        <section class="pane agent-pane" id="agent-pane">
+          <!-- Filter & Search Toolbar -->
+          <div class="pane-toolbar">
+            <div class="filter-pills" id="filter-pills">
+              <button type="button" class="filter-pill active" data-filter="all">All</button>
+              <button type="button" class="filter-pill" data-filter="thought">Thoughts</button>
+              <button type="button" class="filter-pill" data-filter="tool_call">Tools</button>
+              <button type="button" class="filter-pill" data-filter="tool_output">Outputs</button>
+            </div>
+
+            <div class="stream-search-box">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" id="stream-search-input" placeholder="Search events..." />
+            </div>
+          </div>
+
+          <!-- Events Container -->
+          <div class="events-scroll-container" id="events-container">
+            <!-- Welcome / Empty State -->
+            <div class="empty-state" id="empty-state">
+              <div class="empty-icon-glow">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                </svg>
+              </div>
+              <h2>What should Talos solve for you?</h2>
+              <p>Autonomous AI software engineering agent with tool execution, self-correction reasoning loop, and live trajectory streaming.</p>
+
+              <div class="quick-prompts">
+                <button type="button" class="prompt-chip" data-prompt="List the repository directory and summarize the project structure.">
+                  <span class="chip-tag">DIR</span>
+                  <span>Inspect Repository</span>
+                </button>
+                <button type="button" class="prompt-chip" data-prompt="Analyze the architecture, dependencies, and core modules of this project.">
+                  <span class="chip-tag">ARCH</span>
+                  <span>Analyze Architecture</span>
+                </button>
+                <button type="button" class="prompt-chip" data-prompt="Run pytest test suite, inspect any failures, and report the results.">
+                  <span class="chip-tag">TEST</span>
+                  <span>Execute Test Suite</span>
+                </button>
+                <button type="button" class="prompt-chip" data-prompt="Check system tools, inspect files, and verify environment setup.">
+                  <span class="chip-tag">SYS</span>
+                  <span>Environment Health</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Terminal Column -->
+        <section class="pane terminal-pane" id="terminal-pane">
+          <div class="pane-toolbar terminal-toolbar">
+            <div class="terminal-title-group">
+              <span class="terminal-dot red"></span>
+              <span class="terminal-dot yellow"></span>
+              <span class="terminal-dot green"></span>
+              <span class="terminal-heading">Live WebSocket Terminal</span>
+            </div>
+            <div class="terminal-actions">
+              <button type="button" class="btn-action-sm" id="btn-copy-terminal">Copy</button>
+              <button type="button" class="btn-action-sm" id="btn-clear-terminal">Clear</button>
+            </div>
+          </div>
+          <div class="terminal-output" id="terminal-output">
+            <div class="terminal-line system"><span class="terminal-prompt">$</span> Talos WebSocket client initialized. Awaiting task dispatch...</div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Bottom Floating Composer Dock (Replit/Lovable Style) -->
+      <footer class="composer-dock">
+        <form class="composer-form" id="composer-form">
+          <div class="composer-input-wrapper">
+            <textarea
+              id="prompt-input"
+              class="composer-textarea"
+              placeholder="Ask Talos to inspect, write code, run tests, or fix a bug..."
+              rows="1"
+            ></textarea>
+
+            <div class="composer-controls">
+              <span class="composer-hint">Press <kbd>Cmd</kbd>+<kbd>Enter</kbd> to dispatch</span>
+              <button type="submit" class="btn-submit" id="btn-submit">
+                <span class="btn-text">Run Agent</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </form>
+      </footer>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
