@@ -1,21 +1,22 @@
 # Talos
 
-Autonomous software engineering agent framework featuring a tool-use reasoning loop, bounded async worker queues with structured concurrency, graceful shutdown, persistent task state with crash recovery, defensive sandboxing, and real-time WebSocket event streaming.
+Autonomous software engineering agent framework featuring a tool-use reasoning loop, bounded async worker queues with structured concurrency, graceful shutdown, persistent task state with crash recovery, defensive sandboxing, real-time WebSocket event streaming, and a zero-dependency Lovable / Replit AI aesthetic web UI.
 
 ---
 
 ## Key Features
 
-- **Autonomous Reasoning Loop**: Step-by-step ReAct-style agent execution loop (`ReasoningLoop`) with dynamic tool dispatching, observation truncation, and token/cost tracking.
-- **Async Worker Queue & Worker Pool**: Structured concurrency managed via `asyncio.TaskGroup` over a bounded `asyncio.Queue` with configurable worker concurrency.
-- **Persistent Task Store**: Async database persistence using SQLAlchemy and Alembic, tracking complete task lifecycles (`PENDING -> RUNNING -> COMPLETED / FAILED`), metrics, and final answers.
+- **Autonomous Reasoning Loop**: Step-by-step ReAct-style agent execution loop (`ReasoningLoop`) with dynamic tool dispatching, compact observation limits, adaptive rate-limit (429) backoff, and token/cost tracking.
+- **Async Worker Queue & Pool**: Structured concurrency managed via `asyncio.TaskGroup` over a bounded `asyncio.Queue` with configurable worker concurrency.
+- **Persistent Task Store**: Async database persistence using SQLAlchemy and Alembic, tracking complete task lifecycles (`PENDING -> RUNNING -> COMPLETED / FAILED`), token counts, USD cost, and final answers.
 - **Crash Recovery**: Automatic startup recovery identifying any interrupted `RUNNING` tasks from crashes or abrupt server kills and marking them as `FAILED`.
-- **Task Query & Filtering**: REST endpoints (`GET /tasks/{id}`, `GET /tasks?status=...`) with pagination support (`limit`, `offset`).
+- **Task Query & Filtering**: REST endpoints (`POST /tasks`, `GET /tasks/{id}`, `GET /tasks?status=...`, `DELETE /tasks/{id}`, `DELETE /tasks`) with pagination and status filtering.
 - **Backpressure & Load Shedding**: Explicit HTTP `503 Service Unavailable` with `Retry-After` headers when the task queue reaches maximum capacity or during shutdown.
 - **Graceful Shutdown**: Intercepts `SIGTERM` / application lifespan exit, safely stops accepting new submissions, and drains in-flight tasks before termination.
 - **Correlation IDs**: Full UUID `task_id` propagation threaded through every structured log line via `structlog` contextvars and all WebSocket stream events.
 - **WebSocket Event Streaming**: Real-time subscriber endpoint (`/ws?task_id=<uuid>`) streaming versioned events (`thought`, `tool_call`, `tool_output`, `task_complete`, `error`) with event replay support.
 - **Defensive Tool Sandboxing**: Secure `FileSystemTool` (path traversal prevention) and `ShellTool` (command execution with timeouts, output limits, and process cleanup).
+- **Lovable & Replit AI Aesthetic Web UI**: Pure HTML, CSS, and Vanilla JavaScript single-page application with zero Node.js/npm dependencies, served directly by FastAPI. Features real-time streaming event cards, floating composer dock, live terminal drawer, and history management.
 
 ---
 
@@ -49,7 +50,7 @@ cp .env.example .env
 
 Key environment variables:
 - `DATABASE_URL`: Database connection URL (default: `sqlite+aiosqlite:///talos.db`).
-- `LLM_API_KEY`: API key for LLM provider (optional in development; uses Mock LLM if empty).
+- `LLM_API_KEY`: API key for LLM provider (e.g. Groq or OpenAI-compatible endpoint; uses Mock LLM if empty).
 - `LLM_BASE_URL`: Base URL for OpenAI-compatible LLM endpoint (default: `https://api.groq.com/openai/v1`).
 - `LLM_MODEL`: Model name (default: `openai/gpt-oss-120b`).
 - `WORKER_CONCURRENCY`: Number of concurrent async workers in the pool (default: `4`).
@@ -58,28 +59,32 @@ Key environment variables:
 
 ### Running Locally
 
-#### Backend Server
 ```bash
 uv run fastapi dev src/main.py
 ```
-- Web UI & Observer Dashboard: `http://localhost:8000/`
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+- **Web UI & Live Agent Workspace**: [http://localhost:8000/](http://localhost:8000/)
+- **Interactive Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **ReDoc Documentation**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
 
-#### Frontend (Development Mode)
-```bash
-cd frontend
-npm install
-npm run dev
-```
-- Vite Dev Server: `http://localhost:5173/` (proxies API and WebSocket requests to `http://localhost:8000`)
+*(Note: The static frontend can also be viewed via VS Code Live Server at `http://127.0.0.1:5500/` or opened directly as a file; API and WebSocket requests automatically route to the backend on port 8000).*
 
-#### Frontend (Production Build)
-```bash
-cd frontend
-npm run build
-```
-Builds the production bundle to `frontend/dist`, which FastAPI automatically serves at `http://localhost:8000/`.
+---
+
+## Web UI Overview
+
+The web client is built with zero runtime or build dependencies (pure HTML5, CSS3, and modern JavaScript) and features:
+
+1. **Lovable / Replit AI Dark Aesthetic**:
+   - Deep obsidian background (`#09090b`), amber/orange accents (`#f97316`), and glassmorphism borders (`rgba(255, 255, 255, 0.08)`).
+2. **Floating Composer Dock**:
+   - Compact centered prompt composer with auto-expanding textarea, shortcut dispatch (`Cmd+Enter` / `Ctrl+Enter`), and glowing submit button.
+3. **Agent Reasoning & Observation Stream**:
+   - Real-time step-by-step accordion cards displaying agent thoughts, tool action badges, syntax-highlighted outputs, and final accomplishments.
+4. **Live WebSocket Terminal**:
+   - Color-coded log stream with filter pills (`All`, `Thoughts`, `Tools`, `Outputs`), live search, copy, and clear controls.
+5. **Task History & Metrics HUD**:
+   - Left sidebar with task search, status badges, deletion, and database clear action.
+   - Top HUD displaying real-time **Steps**, **Tokens**, **USD Cost**, **Duration**, and View Mode switcher (**Split** / **Agent** / **Terminal**).
 
 ---
 
@@ -117,8 +122,11 @@ ws.onmessage = (event) => {
 # Fetch single task details
 curl http://localhost:8000/tasks/c6a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c
 
-# Filter completed tasks
+# Filter completed tasks with pagination
 curl "http://localhost:8000/tasks?status=COMPLETED&limit=10"
+
+# Clear task history
+curl -X DELETE http://localhost:8000/tasks
 ```
 
 ---
@@ -126,7 +134,7 @@ curl "http://localhost:8000/tasks?status=COMPLETED&limit=10"
 ## Running Tests & Quality Checks
 
 ```bash
-# Run pytest with coverage report
+# Run pytest with full coverage report
 uv run pytest --cov=src --cov-report=term-missing
 
 # Run strict type checking
@@ -148,6 +156,10 @@ Talos/
 ├── alembic.ini                   # Alembic database migration configuration
 ├── migrations/                   # Asynchronous database migration versions
 ├── pyproject.toml                # Project metadata & tool configurations
+├── static/                       # Zero-dependency frontend
+│   ├── app.js                    # Vanilla JS WebSocket streaming & API client
+│   ├── index.html                # Single-page application shell
+│   └── style.css                 # Lovable & Replit AI dark theme stylesheet
 ├── src/
 │   ├── main.py                   # FastAPI app, database lifespan & crash recovery
 │   ├── agent/
@@ -162,7 +174,7 @@ Talos/
 │   │   ├── exception_handlers.py # Standardized JSON error response handlers
 │   │   ├── routes/
 │   │   │   ├── health.py         # /health (liveness) & /readiness endpoints
-│   │   │   ├── tasks.py          # POST /tasks, GET /tasks/{id}, GET /tasks
+│   │   │   ├── tasks.py          # POST /tasks, GET /tasks/{id}, GET /tasks, DELETE /tasks
 │   │   │   └── websocket.py      # /ws subscriber streaming endpoint
 │   │   └── schemas/
 │   │       └── events.py         # Streaming events & TaskDetailResponse schemas
