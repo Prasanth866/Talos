@@ -43,6 +43,7 @@ def _to_task_detail_response(task: Task) -> TaskDetailResponse:
 
 
 @router.post("", response_model=TaskResponse, status_code=202)
+@router.post("/", response_model=TaskResponse, status_code=202)
 async def submit_task(
     request_body: TaskSubmitRequest,
     request: Request,
@@ -135,6 +136,7 @@ async def get_task(
 
 
 @router.get("", response_model=list[TaskDetailResponse])
+@router.get("/", response_model=list[TaskDetailResponse])
 async def list_tasks(
     request: Request,
     status: Annotated[
