@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import re
@@ -250,6 +251,38 @@ class HTTPLLMClient(BaseLLMClient):
                         error_message = err_obj.get("message") or str(err_obj)
                     else:
                         error_message = str(err_obj)
+
+            # Auto-handle 429 rate limits by parsing required wait time
+            if response.status_code == 429:
+                wait_time: float | None = None
+                retry_header = response.headers.get("retry-after")
+                if retry_header:
+                    with contextlib.suppress(ValueError):
+                        wait_time = float(retry_header)
+
+                if wait_time is None:
+                    match = re.search(
+                        r"try again in (\d+(?:\.\d+)?)\s*s",
+                        error_message,
+                        re.IGNORECASE,
+                    )
+                    if match:
+                        with contextlib.suppress(ValueError):
+                            wait_time = float(match.group(1))
+
+                if wait_time is not None and wait_time > 0:
+                    wait_time = min(wait_time + 0.5, 60.0)
+                    logger.warning(
+                        "llm_rate_limit_backoff_sleep",
+                        wait_seconds=wait_time,
+                        model=self.model,
+                    )
+                    await asyncio.sleep(wait_time)
+                    # Retry once after rate limit sleep
+                    retry_resp = await client.post(url, json=payload, headers=headers)
+                    if not retry_resp.is_error:
+                        return retry_resp.json()  # type: ignore[no-any-return]
+
             logger.error(
                 "llm_api_http_error",
                 status_code=response.status_code,

@@ -27,7 +27,7 @@ from src.api.schemas.events import (
 
 logger = structlog.get_logger(__name__)
 
-MAX_OBSERVATION_CHARS = 8000
+MAX_OBSERVATION_CHARS = 3000
 
 
 class ReasoningLoop:
