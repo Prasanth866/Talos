@@ -57,12 +57,29 @@ Key environment variables:
 - `SHUTDOWN_DRAIN_TIMEOUT_SECONDS`: Maximum seconds to wait for in-flight tasks during graceful shutdown (default: `30.0`).
 
 ### Running Locally
+
+#### Backend Server
 ```bash
 uv run fastapi dev src/main.py
 ```
-API Documentation will be available at:
+- Web UI & Observer Dashboard: `http://localhost:8000/`
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
+
+#### Frontend (Development Mode)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+- Vite Dev Server: `http://localhost:5173/` (proxies API and WebSocket requests to `http://localhost:8000`)
+
+#### Frontend (Production Build)
+```bash
+cd frontend
+npm run build
+```
+Builds the production bundle to `frontend/dist`, which FastAPI automatically serves at `http://localhost:8000/`.
 
 ---
 

@@ -35,3 +35,8 @@ htmlcov/
 *.db-journal
 *.sqlite
 *.sqlite3
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+

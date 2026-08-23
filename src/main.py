@@ -5,12 +5,15 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.api.exception_handlers import register_exception_handlers
 from src.api.routes.health import router as health_router
 from src.api.routes.tasks import router as tasks_router
 from src.api.routes.websocket import router as websocket_router
-from src.core.config import get_settings
+from src.core.config import ROOT_DIR, get_settings
 from src.core.database import Database
 from src.core.logging import get_logger, setup_logging
 from src.core.middleware import LoggingAndCorrelationIdMiddleware
@@ -81,6 +84,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(LoggingAndCorrelationIdMiddleware)
 
 register_exception_handlers(app)
@@ -88,3 +98,15 @@ register_exception_handlers(app)
 app.include_router(health_router)
 app.include_router(tasks_router)
 app.include_router(websocket_router)
+
+frontend_dist = ROOT_DIR / "frontend" / "dist"
+if frontend_dist.is_dir():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=frontend_dist / "assets"),
+        name="assets",
+    )
+
+    @app.get("/", include_in_schema=False)
+    async def serve_frontend() -> FileResponse:
+        return FileResponse(frontend_dist / "index.html")
