@@ -252,7 +252,6 @@ class HTTPLLMClient(BaseLLMClient):
                     else:
                         error_message = str(err_obj)
 
-            # Auto-handle 429 rate limits by parsing required wait time
             if response.status_code == 429:
                 wait_time: float | None = None
                 retry_header = response.headers.get("retry-after")

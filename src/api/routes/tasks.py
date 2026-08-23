@@ -185,6 +185,7 @@ async def delete_task(
 
 
 @router.delete("", status_code=200)
+@router.delete("/", status_code=200)
 async def clear_all_tasks(
     request: Request,
 ) -> dict[str, Any]:

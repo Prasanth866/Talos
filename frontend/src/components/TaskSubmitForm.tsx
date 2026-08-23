@@ -120,7 +120,7 @@ export const TaskSubmitForm: React.FC<TaskSubmitFormProps> = ({
           </div>
         </div>
 
-        {/* Quick Templates */}
+        {/* Quick Presets */}
         <div className="templates-section">
           <div className="templates-label">Quick Presets:</div>
           <div className="templates-grid">
@@ -131,6 +131,7 @@ export const TaskSubmitForm: React.FC<TaskSubmitFormProps> = ({
                 className="template-card"
                 onClick={() => setPrompt(tmpl.prompt)}
                 disabled={submitting}
+                title={tmpl.prompt}
               >
                 <span className="template-tag-badge">{tmpl.tag}</span>
                 <span className="template-title">{tmpl.title}</span>

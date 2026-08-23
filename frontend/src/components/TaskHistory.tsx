@@ -59,20 +59,25 @@ export const TaskHistory: React.FC<TaskHistoryProps> = ({
 
     setClearing(true)
     try {
-      const res = await fetch('/tasks', { method: 'DELETE' })
+      const res = await fetch('/tasks', {
+        method: 'DELETE',
+        headers: { 'Accept': 'application/json' },
+      })
       if (res.ok) {
         setTasks([])
         if (onClearActiveTask) {
           onClearActiveTask()
         }
       } else {
-        alert('Failed to clear history')
+        const err = await res.json().catch(() => ({}))
+        alert(`Failed to clear history: ${err.detail || res.statusText}`)
       }
     } catch (err) {
       console.error('Error clearing history:', err)
       alert(`Error clearing history: ${err}`)
     } finally {
       setClearing(false)
+      fetchTasks()
     }
   }
 

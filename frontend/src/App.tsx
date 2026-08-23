@@ -101,35 +101,29 @@ export function App() {
 
   return (
     <div className="vscode-window">
-      {/* 1. VS Code Custom Title Bar */}
+      {/* 1. VS Code Clean Title Bar */}
       <header className="vscode-titlebar">
         <div className="titlebar-left">
           <div className="vscode-app-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0078d4" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0078d4" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
             </svg>
           </div>
-          <nav className="titlebar-menus">
-            <span className="menu-item">File</span>
-            <span className="menu-item">Edit</span>
-            <span className="menu-item">Selection</span>
-            <span className="menu-item">View</span>
-            <span className="menu-item">Go</span>
-            <span className="menu-item">Run</span>
-            <span className="menu-item">Terminal</span>
-            <span className="menu-item">Help</span>
-          </nav>
+          <div className="app-title-text">
+            <span className="app-main-title">Talos Agent</span>
+            <span className="app-version-badge">v0.1.0</span>
+          </div>
         </div>
 
         {/* Command Center */}
         <div className="titlebar-center">
-          <div className="command-center-box">
+          <div className="command-center-box" onClick={() => setActiveView('split')}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8"/>
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
             <span className="command-title">
-              talos-agent [Workspace] {activeTaskId ? `— task-${activeTaskId.slice(0, 8)}` : ''}
+              talos-workspace {activeTaskId ? `— task: ${activeTaskId.slice(0, 8)}...` : '— (No active task)'}
             </span>
             <span className="command-shortcut">Ctrl+P</span>
           </div>
@@ -191,9 +185,9 @@ export function App() {
                   setSidebarCollapsed(false)
                 }
               }}
-              title="Explorer (Ctrl+Shift+E)"
+              title="Explorer: All Panels"
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
                 <polyline points="13 2 13 9 20 9"/>
               </svg>
@@ -210,9 +204,9 @@ export function App() {
                   setSidebarCollapsed(false)
                 }
               }}
-              title="Run & Dispatch Agent (Ctrl+Shift+D)"
+              title="Run & Dispatch Agent"
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="5 3 19 12 5 21 5 3"/>
               </svg>
             </button>
@@ -230,7 +224,7 @@ export function App() {
               }}
               title="Task History & Timeline"
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10"/>
                 <polyline points="12 6 12 12 16 14"/>
               </svg>
@@ -238,31 +232,16 @@ export function App() {
 
             <button
               type="button"
-              className={`activity-icon-btn ${activeActivityTab === 'terminal' ? 'active' : ''}`}
+              className={`activity-icon-btn ${activeView === 'terminal' ? 'active' : ''}`}
               onClick={() => {
                 setActiveView('terminal')
                 setPanelCollapsed(false)
               }}
-              title="Terminal Output (Ctrl+`)"
+              title="Terminal Output"
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="4 17 10 11 4 5"/>
                 <line x1="12" y1="19" x2="20" y2="19"/>
-              </svg>
-            </button>
-          </div>
-
-          <div className="activity-bottom-icons">
-            <button type="button" className="activity-icon-btn" title="Accounts">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                <circle cx="12" cy="7" r="4"/>
-              </svg>
-            </button>
-            <button type="button" className="activity-icon-btn" title="Settings (Ctrl+,)">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
               </svg>
             </button>
           </div>
