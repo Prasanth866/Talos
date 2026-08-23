@@ -5,6 +5,10 @@
 (function () {
   'use strict';
 
+  // --- API & WEBSOCKET BASE PATH RESOLUTION ---
+  const API_BASE = (location.protocol === 'http:' || location.protocol === 'https:') ? '' : 'http://localhost:8000';
+  const WS_BASE = (location.protocol === 'https:') ? `wss://${location.host}` : (location.protocol === 'http:') ? `ws://${location.host}` : 'ws://localhost:8000';
+
   // --- STATE ---
   let activeTaskId = null;
   let activeTaskDetail = null;
@@ -12,7 +16,6 @@
   let rawLogs = [];
   let tasks = [];
   let ws = null;
-  let reconnectTimer = null;
   let activeFilter = 'all';
   let activeView = 'split';
 
@@ -57,23 +60,37 @@
   // --- EVENT LISTENERS ---
   function setupEventListeners() {
     // Sidebar toggle
-    elBtnToggleSidebar.addEventListener('click', () => {
-      elSidebar.classList.toggle('collapsed');
-    });
+    if (elBtnToggleSidebar && elSidebar) {
+      elBtnToggleSidebar.addEventListener('click', () => {
+        if (window.innerWidth <= 768) {
+          elSidebar.classList.toggle('open');
+        } else {
+          elSidebar.classList.toggle('collapsed');
+        }
+      });
+    }
 
     // New task
-    elBtnNewTask.addEventListener('click', () => {
-      resetActiveSession();
-    });
+    if (elBtnNewTask) {
+      elBtnNewTask.addEventListener('click', () => {
+        resetActiveSession();
+      });
+    }
 
     // Refresh history
-    elBtnRefreshHistory.addEventListener('click', fetchTasks);
+    if (elBtnRefreshHistory) {
+      elBtnRefreshHistory.addEventListener('click', fetchTasks);
+    }
 
     // Clear all history
-    elBtnClearHistory.addEventListener('click', handleClearAllHistory);
+    if (elBtnClearHistory) {
+      elBtnClearHistory.addEventListener('click', handleClearAllHistory);
+    }
 
     // Search history
-    elHistorySearch.addEventListener('input', renderHistoryList);
+    if (elHistorySearch) {
+      elHistorySearch.addEventListener('input', renderHistoryList);
+    }
 
     // View switchers
     document.querySelectorAll('.view-btn').forEach((btn) => {
@@ -81,43 +98,57 @@
         document.querySelectorAll('.view-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         activeView = btn.dataset.view;
-        elWorkspaceBody.className = 'workspace-body view-' + activeView;
+        if (elWorkspaceBody) {
+          elWorkspaceBody.className = 'workspace-body view-' + activeView;
+        }
       });
     });
 
     // Filter pills
-    elFilterPills.addEventListener('click', (e) => {
-      const pill = e.target.closest('.filter-pill');
-      if (!pill) return;
-      document.querySelectorAll('.filter-pill').forEach((p) => p.classList.remove('active'));
-      pill.classList.add('active');
-      activeFilter = pill.dataset.filter;
-      renderEvents();
-    });
+    if (elFilterPills) {
+      elFilterPills.addEventListener('click', (e) => {
+        const pill = e.target.closest('.filter-pill');
+        if (!pill) return;
+        document.querySelectorAll('.filter-pill').forEach((p) => p.classList.remove('active'));
+        pill.classList.add('active');
+        activeFilter = pill.dataset.filter;
+        renderEvents();
+      });
+    }
 
     // Stream search
-    elStreamSearch.addEventListener('input', renderEvents);
+    if (elStreamSearch) {
+      elStreamSearch.addEventListener('input', renderEvents);
+    }
 
     // Export trajectory
-    elBtnExportJson.addEventListener('click', handleExportTrajectory);
+    if (elBtnExportJson) {
+      elBtnExportJson.addEventListener('click', handleExportTrajectory);
+    }
 
     // Terminal actions
-    elBtnCopyTerminal.addEventListener('click', () => {
-      const text = rawLogs.map((l) => `[${l.time}] ${l.raw}`).join('\n');
-      navigator.clipboard.writeText(text);
-      elBtnCopyTerminal.textContent = 'Copied!';
-      setTimeout(() => (elBtnCopyTerminal.textContent = 'Copy'), 1500);
-    });
+    if (elBtnCopyTerminal) {
+      elBtnCopyTerminal.addEventListener('click', () => {
+        const text = rawLogs.map((l) => `[${l.time}] ${l.raw}`).join('\n');
+        navigator.clipboard.writeText(text);
+        elBtnCopyTerminal.textContent = 'Copied!';
+        setTimeout(() => (elBtnCopyTerminal.textContent = 'Copy'), 1500);
+      });
+    }
 
-    elBtnClearTerminal.addEventListener('click', () => {
-      rawLogs = [];
-      elTerminalOutput.innerHTML = '';
-    });
+    if (elBtnClearTerminal) {
+      elBtnClearTerminal.addEventListener('click', () => {
+        rawLogs = [];
+        if (elTerminalOutput) {
+          elTerminalOutput.innerHTML = '';
+        }
+      });
+    }
 
     // Quick prompt chips
     document.addEventListener('click', (e) => {
       const chip = e.target.closest('.prompt-chip');
-      if (chip && chip.dataset.prompt) {
+      if (chip && chip.dataset.prompt && elPromptInput) {
         elPromptInput.value = chip.dataset.prompt;
         elPromptInput.focus();
         adjustTextareaHeight();
@@ -125,19 +156,26 @@
     });
 
     // Composer textarea auto-grow & keyboard submit
-    elPromptInput.addEventListener('input', adjustTextareaHeight);
-    elPromptInput.addEventListener('keydown', (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        e.preventDefault();
-        elComposerForm.requestSubmit();
-      }
-    });
+    if (elPromptInput) {
+      elPromptInput.addEventListener('input', adjustTextareaHeight);
+      elPromptInput.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          e.preventDefault();
+          if (elComposerForm) {
+            elComposerForm.requestSubmit();
+          }
+        }
+      });
+    }
 
     // Form submit
-    elComposerForm.addEventListener('submit', handleTaskSubmit);
+    if (elComposerForm) {
+      elComposerForm.addEventListener('submit', handleTaskSubmit);
+    }
   }
 
   function adjustTextareaHeight() {
+    if (!elPromptInput) return;
     elPromptInput.style.height = 'auto';
     elPromptInput.style.height = Math.min(elPromptInput.scrollHeight, 160) + 'px';
   }
@@ -145,14 +183,12 @@
   // --- WEBSOCKET CLIENT ---
   function connectWebSocket(taskId) {
     if (ws) {
-      ws.close();
+      try { ws.close(); } catch (_) {}
       ws = null;
     }
-    clearTimeout(reconnectTimer);
 
     updateConnectionStatus('connecting', 'Connecting...');
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${location.host}/ws?task_id=${encodeURIComponent(taskId)}`;
+    const wsUrl = `${WS_BASE}/ws?task_id=${encodeURIComponent(taskId)}`;
 
     try {
       ws = new WebSocket(wsUrl);
@@ -179,7 +215,6 @@
       ws.onclose = (event) => {
         updateConnectionStatus('disconnected', 'Disconnected');
         appendTerminalLine('system', `WebSocket connection closed (code: ${event.code})`);
-        // Refresh detail on finish
         setTimeout(() => {
           if (activeTaskId === taskId) {
             fetchTaskDetail(taskId);
@@ -199,6 +234,7 @@
   }
 
   function updateConnectionStatus(state, label) {
+    if (!elConnectionStatus) return;
     elConnectionStatus.innerHTML = `
       <span class="status-dot ${state}"></span>
       <span class="status-text">${label}</span>
@@ -217,18 +253,22 @@
 
   function updateMetricsFromEvent(evt) {
     const steps = events.filter((e) => 'step' in e).length;
-    elMetricSteps.textContent = steps;
+    if (elMetricSteps) elMetricSteps.textContent = steps;
 
     if (evt.event_type === 'task_complete') {
-      elTaskIdBadge.textContent = 'COMPLETED';
-      elTaskIdBadge.className = 'task-id-badge status-tag COMPLETED';
-      if (evt.total_tokens) elMetricTokens.textContent = evt.total_tokens.toLocaleString();
-      if (evt.total_cost_usd !== undefined) elMetricCost.textContent = '$' + evt.total_cost_usd.toFixed(5);
-      if (evt.duration_seconds !== undefined) elMetricDuration.textContent = evt.duration_seconds.toFixed(2) + 's';
+      if (elTaskIdBadge) {
+        elTaskIdBadge.textContent = 'COMPLETED';
+        elTaskIdBadge.className = 'task-id-badge status-tag COMPLETED';
+      }
+      if (evt.total_tokens && elMetricTokens) elMetricTokens.textContent = evt.total_tokens.toLocaleString();
+      if (evt.total_cost_usd !== undefined && elMetricCost) elMetricCost.textContent = '$' + evt.total_cost_usd.toFixed(5);
+      if (evt.duration_seconds !== undefined && elMetricDuration) elMetricDuration.textContent = evt.duration_seconds.toFixed(2) + 's';
     } else if (evt.event_type === 'error') {
-      elTaskIdBadge.textContent = 'FAILED';
-      elTaskIdBadge.className = 'task-id-badge status-tag FAILED';
-    } else if (activeTaskId) {
+      if (elTaskIdBadge) {
+        elTaskIdBadge.textContent = 'FAILED';
+        elTaskIdBadge.className = 'task-id-badge status-tag FAILED';
+      }
+    } else if (activeTaskId && elTaskIdBadge) {
       elTaskIdBadge.textContent = 'RUNNING';
       elTaskIdBadge.className = 'task-id-badge status-tag RUNNING';
     }
@@ -236,7 +276,8 @@
 
   // --- RENDER EVENTS (AGENT STREAM) ---
   function renderEvents() {
-    const query = elStreamSearch.value.trim().toLowerCase();
+    if (!elEventsContainer) return;
+    const query = elStreamSearch ? elStreamSearch.value.trim().toLowerCase() : '';
     const filtered = events.filter((evt) => {
       if (activeFilter !== 'all' && evt.event_type !== activeFilter) {
         return false;
@@ -248,10 +289,10 @@
     });
 
     if (events.length === 0) {
-      elEmptyState.style.display = 'flex';
+      if (elEmptyState) elEmptyState.style.display = 'flex';
       return;
     }
-    elEmptyState.style.display = 'none';
+    if (elEmptyState) elEmptyState.style.display = 'none';
 
     // Remove existing event cards
     const existingCards = elEventsContainer.querySelectorAll('.event-card');
@@ -275,7 +316,7 @@
       card.innerHTML = `
         <div class="event-header">
           <div class="event-header-left">
-            <span class="step-chip">Step ${evt.step}</span>
+            <span class="step-chip">Step ${evt.step || index + 1}</span>
             <span class="event-type-badge badge-thought">Reasoning Thought</span>
           </div>
           <span class="event-time">${time}</span>
@@ -287,7 +328,7 @@
       card.innerHTML = `
         <div class="event-header">
           <div class="event-header-left">
-            <span class="step-chip">Step ${evt.step}</span>
+            <span class="step-chip">Step ${evt.step || index + 1}</span>
             <span class="event-type-badge badge-tool_call">Action</span>
             <span class="event-tool-name">${escapeHtml(evt.tool_name)}</span>
           </div>
@@ -301,7 +342,7 @@
       card.innerHTML = `
         <div class="event-header">
           <div class="event-header-left">
-            <span class="step-chip">Step ${evt.step}</span>
+            <span class="step-chip">Step ${evt.step || index + 1}</span>
             <span class="event-type-badge badge-tool_output">Observation</span>
             <span class="event-tool-name">${escapeHtml(evt.tool_name)}</span>
           </div>
@@ -343,6 +384,7 @@
 
   // --- TERMINAL LOGGING ---
   function appendTerminalLine(type, text) {
+    if (!elTerminalOutput) return;
     const line = document.createElement('div');
     line.className = `terminal-line ${type}`;
     const time = new Date().toLocaleTimeString();
@@ -365,17 +407,20 @@
 
   // --- TASK SUBMISSION ---
   async function handleTaskSubmit(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    if (!elPromptInput) return;
     const prompt = elPromptInput.value.trim();
     if (!prompt) return;
 
-    elBtnSubmit.disabled = true;
-    elBtnSubmit.innerHTML = '<span>Dispatching...</span>';
+    if (elBtnSubmit) {
+      elBtnSubmit.disabled = true;
+      elBtnSubmit.innerHTML = '<span>Dispatching...</span>';
+    }
 
     try {
-      const res = await fetch('/tasks', {
+      const res = await fetch(`${API_BASE}/tasks`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ task: prompt, metadata: { source: 'lovable-vanilla-client' } }),
       });
 
@@ -394,21 +439,23 @@
       console.error('Task submission error:', err);
       alert(`Submission error: ${err}`);
     } finally {
-      elBtnSubmit.disabled = false;
-      elBtnSubmit.innerHTML = `
-        <span class="btn-text">Run Agent</span>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <line x1="22" y1="2" x2="11" y2="13"></line>
-          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-        </svg>
-      `;
+      if (elBtnSubmit) {
+        elBtnSubmit.disabled = false;
+        elBtnSubmit.innerHTML = `
+          <span class="btn-text">Run Agent</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        `;
+      }
     }
   }
 
   // --- TASK HISTORY & STATE MANAGEMENT ---
   async function fetchTasks() {
     try {
-      const res = await fetch('/tasks?limit=50');
+      const res = await fetch(`${API_BASE}/tasks?limit=50`);
       if (res.ok) {
         tasks = await res.json();
         renderHistoryList();
@@ -419,7 +466,8 @@
   }
 
   function renderHistoryList() {
-    const q = elHistorySearch.value.trim().toLowerCase();
+    if (!elHistoryList) return;
+    const q = elHistorySearch ? elHistorySearch.value.trim().toLowerCase() : '';
     const filtered = tasks.filter((t) => !q || t.task.toLowerCase().includes(q) || t.task_id.includes(q));
 
     if (filtered.length === 0) {
@@ -453,7 +501,7 @@
 
   window.deleteTask = async function (taskId) {
     try {
-      const res = await fetch(`/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
       if (res.ok) {
         tasks = tasks.filter((t) => t.task_id !== taskId);
         if (activeTaskId === taskId) {
@@ -469,7 +517,7 @@
   async function handleClearAllHistory() {
     if (!confirm('Are you sure you want to clear all tasks from the database?')) return;
     try {
-      const res = await fetch('/tasks', { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/tasks`, { method: 'DELETE' });
       if (res.ok) {
         tasks = [];
         resetActiveSession();
@@ -482,15 +530,17 @@
 
   async function fetchTaskDetail(taskId) {
     try {
-      const res = await fetch(`/tasks/${encodeURIComponent(taskId)}`);
+      const res = await fetch(`${API_BASE}/tasks/${encodeURIComponent(taskId)}`);
       if (res.ok) {
         activeTaskDetail = await res.json();
-        elTaskTitleDisplay.textContent = activeTaskDetail.task;
-        elTaskIdBadge.textContent = activeTaskDetail.status;
-        elTaskIdBadge.className = `task-id-badge status-tag ${activeTaskDetail.status}`;
-        elMetricTokens.textContent = (activeTaskDetail.total_tokens || 0).toLocaleString();
-        elMetricCost.textContent = '$' + (activeTaskDetail.total_cost_usd || 0).toFixed(5);
-        elMetricDuration.textContent = (activeTaskDetail.duration_seconds || 0).toFixed(2) + 's';
+        if (elTaskTitleDisplay) elTaskTitleDisplay.textContent = activeTaskDetail.task;
+        if (elTaskIdBadge) {
+          elTaskIdBadge.textContent = activeTaskDetail.status;
+          elTaskIdBadge.className = `task-id-badge status-tag ${activeTaskDetail.status}`;
+        }
+        if (elMetricTokens) elMetricTokens.textContent = (activeTaskDetail.total_tokens || 0).toLocaleString();
+        if (elMetricCost) elMetricCost.textContent = '$' + (activeTaskDetail.total_cost_usd || 0).toFixed(5);
+        if (elMetricDuration) elMetricDuration.textContent = (activeTaskDetail.duration_seconds || 0).toFixed(2) + 's';
       }
     } catch (err) {
       console.error('Failed to fetch detail:', err);
@@ -501,15 +551,17 @@
     activeTaskId = taskId;
     events = [];
     rawLogs = [];
-    elTerminalOutput.innerHTML = '';
-    elTaskTitleDisplay.textContent = taskText || `Task ${taskId.slice(0, 8)}`;
-    elTaskIdBadge.textContent = 'RUNNING';
-    elTaskIdBadge.className = 'task-id-badge status-tag RUNNING';
+    if (elTerminalOutput) elTerminalOutput.innerHTML = '';
+    if (elTaskTitleDisplay) elTaskTitleDisplay.textContent = taskText || `Task ${taskId.slice(0, 8)}`;
+    if (elTaskIdBadge) {
+      elTaskIdBadge.textContent = 'RUNNING';
+      elTaskIdBadge.className = 'task-id-badge status-tag RUNNING';
+    }
     
-    elMetricSteps.textContent = '0';
-    elMetricTokens.textContent = '0';
-    elMetricCost.textContent = '$0.00000';
-    elMetricDuration.textContent = '0.0s';
+    if (elMetricSteps) elMetricSteps.textContent = '0';
+    if (elMetricTokens) elMetricTokens.textContent = '0';
+    if (elMetricCost) elMetricCost.textContent = '$0.00000';
+    if (elMetricDuration) elMetricDuration.textContent = '0.0s';
 
     renderHistoryList();
     renderEvents();
@@ -523,17 +575,19 @@
     events = [];
     rawLogs = [];
     if (ws) {
-      ws.close();
+      try { ws.close(); } catch (_) {}
       ws = null;
     }
     updateConnectionStatus('disconnected', 'Idle');
-    elTaskTitleDisplay.textContent = 'New Autonomous Session';
-    elTaskIdBadge.textContent = 'IDLE';
-    elTaskIdBadge.className = 'task-id-badge';
-    elMetricSteps.textContent = '0';
-    elMetricTokens.textContent = '0';
-    elMetricCost.textContent = '$0.00000';
-    elMetricDuration.textContent = '0.0s';
+    if (elTaskTitleDisplay) elTaskTitleDisplay.textContent = 'New Autonomous Session';
+    if (elTaskIdBadge) {
+      elTaskIdBadge.textContent = 'IDLE';
+      elTaskIdBadge.className = 'task-id-badge';
+    }
+    if (elMetricSteps) elMetricSteps.textContent = '0';
+    if (elMetricTokens) elMetricTokens.textContent = '0';
+    if (elMetricCost) elMetricCost.textContent = '$0.00000';
+    if (elMetricDuration) elMetricDuration.textContent = '0.0s';
     
     renderEvents();
     renderHistoryList();
