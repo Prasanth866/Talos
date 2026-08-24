@@ -1,21 +1,59 @@
 from __future__ import annotations
 
-import logging
 import random
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import structlog
 from tenacity import (
     AsyncRetrying,
+    RetryCallState,
     Retrying,
-    before_sleep_log,
     retry_if_exception,
     stop_after_attempt,
     wait_exponential,
     wait_random_exponential,
 )
 
-_std_logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
+
+
+def _before_sleep_log(retry_state: RetryCallState) -> None:
+    """Structlog-based before_sleep callback for Tenacity retry loops.
+
+    Emits a structured ``retry_sleeping`` warning that inherits all bound
+    structlog contextvars (e.g. ``task_id``) — something stdlib
+    ``before_sleep_log`` cannot do.
+    """
+    if retry_state.outcome is None or retry_state.next_action is None:
+        return
+
+    fn_name = (
+        getattr(retry_state.fn, "__qualname__", None)
+        or getattr(retry_state.fn, "__name__", None)
+        or "<unknown>"
+    )
+    sleep_for = retry_state.next_action.sleep
+
+    if retry_state.outcome.failed:
+        exc = retry_state.outcome.exception()
+        logger.warning(
+            "retry_sleeping",
+            fn=fn_name,
+            attempt=retry_state.attempt_number,
+            sleep_seconds=round(sleep_for, 3),
+            exc_type=type(exc).__name__,
+            exc_msg=str(exc),
+        )
+    else:
+        result = retry_state.outcome.result()
+        logger.warning(
+            "retry_sleeping",
+            fn=fn_name,
+            attempt=retry_state.attempt_number,
+            sleep_seconds=round(sleep_for, 3),
+            returned=repr(result),
+        )
 
 
 class NonRetryableError(Exception):
@@ -169,7 +207,7 @@ async def retry_async[R](
         stop=stop_after_attempt(max_retries + 1),
         wait=wait_strategy,
         retry=retry_if_exception(should_retry),
-        before_sleep=before_sleep_log(_std_logger, logging.INFO),
+        before_sleep=_before_sleep_log,
         reraise=True,
     ):
         with attempt:
@@ -225,7 +263,7 @@ def retry_sync[R](
         stop=stop_after_attempt(max_retries + 1),
         wait=wait_strategy,
         retry=retry_if_exception(should_retry),
-        before_sleep=before_sleep_log(_std_logger, logging.INFO),
+        before_sleep=_before_sleep_log,
         reraise=True,
     ):
         with attempt:
