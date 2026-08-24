@@ -1,16 +1,18 @@
 # Talos
 
-Autonomous software engineering agent framework featuring a tool-use reasoning loop, bounded async worker queues with structured concurrency, graceful shutdown, persistent task state with crash recovery, defensive sandboxing, real-time WebSocket event streaming, and a zero-dependency Lovable / Replit AI aesthetic web UI.
+Autonomous software engineering agent framework featuring a tool-use reasoning loop, bounded async worker queues with structured concurrency, graceful shutdown, persistent task state with crash recovery, Docker-based isolated task workspaces, defensive sandboxing, real-time WebSocket event streaming, and a zero-dependency Lovable / Replit AI aesthetic web UI.
 
 ---
 
 ## Key Features
 
 - **Autonomous Reasoning Loop**: Step-by-step ReAct-style agent execution loop (`ReasoningLoop`) with dynamic tool dispatching, compact observation limits, adaptive rate-limit (429) backoff, and token/cost tracking.
+- **Docker Workspace Isolation**: Task-isolated container environments (`WorkspaceManager`) with shallow Git repository cloning (`--depth 1`), custom volume mounting, command execution, and structured `WorkspaceError` wrapping.
 - **Async Worker Queue & Pool**: Structured concurrency managed via `asyncio.TaskGroup` over a bounded `asyncio.Queue` with configurable worker concurrency.
 - **Persistent Task Store**: Async database persistence using SQLAlchemy and Alembic, tracking complete task lifecycles (`PENDING -> RUNNING -> COMPLETED / FAILED`), token counts, USD cost, and final answers.
 - **Crash Recovery**: Automatic startup recovery identifying any interrupted `RUNNING` tasks from crashes or abrupt server kills and marking them as `FAILED`.
 - **Task Query & Filtering**: REST endpoints (`POST /tasks`, `GET /tasks/{id}`, `GET /tasks?status=...`, `DELETE /tasks/{id}`, `DELETE /tasks`) with pagination and status filtering.
+- **Resilient Retries with Full Jitter**: Tenacity-powered async and sync retry utilities with true randomized exponential backoff (`wait_random_exponential`), parameter validation, defensive HTTP status parsing, and structured `structlog` before-sleep logging with correlation ID preservation.
 - **Backpressure & Load Shedding**: Explicit HTTP `503 Service Unavailable` with `Retry-After` headers when the task queue reaches maximum capacity or during shutdown.
 - **Graceful Shutdown**: Intercepts `SIGTERM` / application lifespan exit, safely stops accepting new submissions, and drains in-flight tasks before termination.
 - **Correlation IDs**: Full UUID `task_id` propagation threaded through every structured log line via `structlog` contextvars and all WebSocket stream events.
@@ -25,6 +27,7 @@ Autonomous software engineering agent framework featuring a tool-use reasoning l
 ### Prerequisites
 - Python >= 3.14
 - [`uv`](https://github.com/astral-sh/uv)
+- Docker Desktop or Docker Engine (optional, for workspace container isolation)
 
 ### Installation
 ```bash
@@ -67,6 +70,47 @@ uv run fastapi dev src/main.py
 - **ReDoc Documentation**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
 
 *(Note: The static frontend can also be viewed via VS Code Live Server at `http://127.0.0.1:5500/` or opened directly as a file; API and WebSocket requests automatically route to the backend on port 8000).*
+
+---
+
+## Docker Workspace Manager
+
+Talos provides isolated task workspaces where each task runs inside its own Docker container with a shallow-cloned Git repository:
+
+```python
+from src.workspace import WorkspaceManager
+
+manager = WorkspaceManager()
+
+# Create an isolated workspace with a shallow clone
+workspace = manager.create(
+    repo_url="https://github.com/octocat/Hello-World.git",
+    commit_sha=None,  # or specific commit SHA
+    image="python:3.12-slim",
+)
+
+# Run commands inside the isolated container
+result = manager.run_command(
+    workspace.workspace_id, ["python", "-c", "print('Hello from container')"]
+)
+print(result["stdout"])
+
+# List files inside workspace
+files = manager.list_files(workspace.workspace_id)
+
+# Teardown container and delete host directory cleanly
+manager.destroy(workspace.workspace_id)
+```
+
+### Typed Error Hierarchy
+All Docker and Git operations are strictly wrapped so no low-level raw exceptions leak to caller code:
+- `WorkspaceError`: Base class providing structured `.to_dict()` outputs.
+- `DockerDaemonError`: Unreachable or stopped Docker daemon.
+- `WorkspaceCreationError`: Container initialization or volume mount failure.
+- `WorkspaceNotFoundError`: Workspace ID not registered.
+- `WorkspaceDestroyError`: Container teardown or cleanup failure.
+- `GitCloneError`: Git clone or commit checkout failure.
+- `WorkspaceExecutionError`: Command execution failure inside the container.
 
 ---
 
@@ -137,6 +181,9 @@ curl -X DELETE http://localhost:8000/tasks
 # Run pytest with full coverage report
 uv run pytest --cov=src --cov-report=term-missing
 
+# Run live Docker workspace experiment test
+uv run pytest tests/workspace/test_experiment.py -v -s
+
 # Run strict type checking
 uv run mypy src tests migrations
 
@@ -168,7 +215,7 @@ Talos/
 │   │   ├── loop.py               # ReAct reasoning loop coordinator
 │   │   ├── models.py             # Trajectory, Step, TokenUsage & Message models
 │   │   ├── prompts.py            # System prompts & tool documentation formatting
-│   │   ├── retry.py              # Exponential backoff & retry mechanisms
+│   │   ├── retry.py              # Exponential backoff, jitter & Tenacity retry utilities
 │   │   └── token_tracker.py      # Token counting & dollar cost tracking
 │   ├── api/
 │   │   ├── exception_handlers.py # Standardized JSON error response handlers
@@ -187,18 +234,24 @@ Talos/
 │   ├── db/
 │   │   ├── models.py             # Task SQLAlchemy ORM model & TaskStatus enum
 │   │   └── repository.py         # Pure-function asynchronous data access layer
-│   └── tools/
-│       ├── exceptions.py         # Custom ToolError exception hierarchy
-│       ├── filesystem.py         # Sandboxed FileSystemTool & path safety
-│       ├── shell.py              # Defensive ShellTool with timeout & process cleanup
-│       └── system_tools.py       # Backward-compatible re-exports
+│   ├── tools/
+│   │   ├── exceptions.py         # Custom ToolError exception hierarchy
+│   │   ├── filesystem.py         # Sandboxed FileSystemTool & path safety
+│   │   ├── shell.py              # Defensive ShellTool with timeout & process cleanup
+│   │   └── system_tools.py       # Backward-compatible re-exports
+│   └── workspace/
+│       ├── exceptions.py         # Typed WorkspaceError exception hierarchy
+│       ├── git_utils.py          # Shallow clone & commit resolution with GitPython
+│       ├── manager.py            # WorkspaceManager container lifecycle controller
+│       └── models.py             # Workspace dataclass & WorkspaceStatus enum
 └── tests/
     ├── conftest.py               # Shared test fixtures & client lifecycle
     ├── agent/                    # Agent loop, dispatcher, LLM & retry tests
     ├── api/                      # API endpoint, WebSocket, task queries & schema tests
     ├── core/                     # Config, logging, middleware & worker pool tests
     ├── db/                       # Repository and crash recovery test suites
-    └── tools/                    # File system & shell tool test suites
+    ├── tools/                    # File system & shell tool test suites
+    └── workspace/                # WorkspaceManager unit tests & live Docker experiment
 ```
 
 ---
