@@ -240,7 +240,11 @@ class WorkspaceManager:
         try:
             container = self.client.containers.get(workspace.container_id)
             exec_res = container.exec_run(cmd=command, workdir=workdir)
-            exit_code: int = exec_res.exit_code if exec_res.exit_code is not None else 0
+            raw_exit_code = exec_res.exit_code
+            if raw_exit_code is None:
+                exit_code: int = 0
+            else:
+                exit_code = int(raw_exit_code)
             raw_output = exec_res.output
             if isinstance(raw_output, tuple):
                 raw_bytes = (raw_output[0] or b"") if raw_output else b""
@@ -250,8 +254,6 @@ class WorkspaceManager:
                 raw_bytes = b"".join(
                     chunk for chunk in raw_output if isinstance(chunk, bytes)
                 )
-            else:
-                raw_bytes = b""
             output_str = raw_bytes.decode("utf-8", errors="replace").strip()
 
             if exit_code != 0:

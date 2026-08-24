@@ -287,7 +287,7 @@ class ReasoningLoop:
         )
         await _emit(
             ErrorEvent(
-                error=trajectory.error,
+                error=trajectory.error or "Unknown error occurred",
                 step=self.max_steps,
                 task_id=task_id,
             )

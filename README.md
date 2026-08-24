@@ -1,6 +1,6 @@
 # Talos
 
-Autonomous software engineering agent framework featuring a tool-use reasoning loop, bounded async worker queues with structured concurrency, graceful shutdown, persistent task state with crash recovery, Docker-based isolated task workspaces, defensive sandboxing, real-time WebSocket event streaming, and a zero-dependency Lovable / Replit AI aesthetic web UI.
+Autonomous software engineering agent framework featuring a tool-use reasoning loop, bounded async worker queues with structured concurrency, graceful shutdown, persistent task state with crash recovery, Docker-based isolated task workspaces, defensive sandboxing, real-time WebSocket event streaming, and a zero-dependency aesthetic web UI.
 
 ---
 

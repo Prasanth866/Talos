@@ -147,16 +147,16 @@ class ShellTool:
 
         process: asyncio.subprocess.Process | None = None
         try:
-            process = await asyncio.create_subprocess_exec(
+            created_process = await asyncio.create_subprocess_exec(
                 executable,
                 *cmd_args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.working_dir,
             )
-
+            process = created_process
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(), timeout=self.timeout_seconds
+                created_process.communicate(), timeout=self.timeout_seconds
             )
 
         except TimeoutError as exc:
@@ -194,6 +194,13 @@ class ShellTool:
 
         stdout = _truncate(stdout_bytes.decode("utf-8", errors="replace").strip())
         stderr = _truncate(stderr_bytes.decode("utf-8", errors="replace").strip())
+
+        if process is None:
+            raise ToolError(
+                message="Process was not created.",
+                tool_name="ShellTool",
+                details={"executable": executable},
+            )
 
         return_code = process.returncode
         if return_code is None:

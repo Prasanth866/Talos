@@ -183,7 +183,9 @@ class FileSystemTool:
     async def async_read_file(
         self, relative_path: str | Path, binary: bool = False
     ) -> str | bytes:
-        return await asyncio.to_thread(self.read_file, relative_path, binary)
+        return await asyncio.to_thread(
+            lambda: self.read_file(relative_path, binary=binary)
+        )
 
     async def async_read_bytes(self, relative_path: str | Path) -> bytes:
         return await asyncio.to_thread(self.read_bytes, relative_path)

@@ -32,7 +32,7 @@ class Database:
             @event.listens_for(self.engine.sync_engine, "connect")
             def set_sqlite_pragma(
                 dbapi_connection: Any,
-                connection_record: Any,
+                _connection_record: Any,
             ) -> None:
                 cursor = dbapi_connection.cursor()
                 cursor.execute("PRAGMA journal_mode=WAL")
