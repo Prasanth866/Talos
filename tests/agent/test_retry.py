@@ -146,6 +146,15 @@ def test_is_transient_error_http_status_codes() -> None:
     assert is_transient_error(DummyHTTPError(401)) is False
     assert is_transient_error(DummyHTTPError(404)) is False
 
+    class NonIntStatusError(Exception):
+        def __init__(self, status_code: object) -> None:
+            super().__init__("Non int status error")
+            self.status_code = status_code
+
+    # Non-integer status_code falls through without TypeError
+    assert is_transient_error(NonIntStatusError("invalid")) is False
+    assert is_transient_error(NonIntStatusError(None)) is False
+
 
 def test_retry_parameter_validation() -> None:
     """Verifies that invalid configuration parameters raise ValueError."""

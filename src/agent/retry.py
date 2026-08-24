@@ -68,7 +68,7 @@ def is_transient_error(exc: BaseException) -> bool:
         return False
 
     status_code = getattr(exc, "status_code", None)
-    if status_code is not None:
+    if isinstance(status_code, int):
         if status_code in (429, 500, 502, 503, 504, 520, 524):
             return True
         if 400 <= status_code < 500:
