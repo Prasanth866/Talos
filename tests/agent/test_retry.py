@@ -151,6 +151,7 @@ def test_retry_parameter_validation() -> None:
     """Verifies that invalid configuration parameters raise ValueError."""
     dummy = MagicMock()
 
+    # retry_sync / retry_async validation
     with pytest.raises(ValueError, match="max_retries must be >= 0"):
         retry_sync(dummy, max_retries=-1)
 
@@ -162,3 +163,16 @@ def test_retry_parameter_validation() -> None:
 
     with pytest.raises(ValueError, match="max_delay must be >= 0"):
         retry_sync(dummy, max_delay=-1.0)
+
+    # compute_backoff_delay validation
+    with pytest.raises(ValueError, match="attempt must be >= 0"):
+        compute_backoff_delay(attempt=-1)
+
+    with pytest.raises(ValueError, match="initial_delay must be >= 0"):
+        compute_backoff_delay(attempt=0, initial_delay=-1.0)
+
+    with pytest.raises(ValueError, match="backoff_factor must be >= 1"):
+        compute_backoff_delay(attempt=0, backoff_factor=0.5)
+
+    with pytest.raises(ValueError, match="max_delay must be >= 0"):
+        compute_backoff_delay(attempt=0, max_delay=-5.0)

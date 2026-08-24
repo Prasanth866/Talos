@@ -82,7 +82,7 @@ def is_transient_error(exc: BaseException) -> bool:
         return True
 
     exc_repr = f"{type(exc).__name__}: {exc}".lower()
-    transient_indicators = [
+    transient_indicators = (
         "rate limit",
         "ratelimit",
         "429",
@@ -99,31 +99,8 @@ def is_transient_error(exc: BaseException) -> bool:
         "temporarily unavailable",
         "timed out",
         "timeout",
-    ]
+    )
     return any(indicator in exc_repr for indicator in transient_indicators)
-
-
-def compute_backoff_delay(
-    attempt: int,
-    initial_delay: float = 0.5,
-    backoff_factor: float = 2.0,
-    max_delay: float = 60.0,
-    jitter: bool = True,
-) -> float:
-    """Calculates exponential backoff delay with optional full-jitter [0, delay].
-
-    Kept for compatibility and direct use where callers need to compute a
-    delay value without executing a retry loop.
-
-    Note: This is a standalone helper. The retry functions use Tenacity's
-    ``wait_random_exponential`` for jitter (true full-jitter over [0, delay])
-    or ``wait_exponential`` for deterministic backoff.
-    """
-    calculated = initial_delay * (backoff_factor**attempt)
-    delay = min(calculated, max_delay)
-    if jitter and delay > 0:
-        delay = random.uniform(0, delay)  # noqa: S311
-    return delay
 
 
 def _validate_retry_parameters(
@@ -146,6 +123,35 @@ def _validate_retry_parameters(
         raise ValueError(f"max_delay must be >= 0, got {max_delay}")
 
 
+def compute_backoff_delay(
+    attempt: int,
+    initial_delay: float = 0.5,
+    backoff_factor: float = 2.0,
+    max_delay: float = 60.0,
+    jitter: bool = True,
+) -> float:
+    """Calculates exponential backoff delay with optional randomized jitter.
+
+    Kept for compatibility and direct use where callers need to compute a
+    delay value without executing a retry loop.
+    """
+    if attempt < 0:
+        raise ValueError(f"attempt must be >= 0, got {attempt}")
+
+    _validate_retry_parameters(
+        max_retries=0,
+        initial_delay=initial_delay,
+        backoff_factor=backoff_factor,
+        max_delay=max_delay,
+    )
+
+    calculated = initial_delay * (backoff_factor**attempt)
+    delay = min(calculated, max_delay)
+    if jitter and delay > 0:
+        delay = random.uniform(0, delay)  # noqa: S311
+    return delay
+
+
 def _build_wait_strategy(
     *,
     initial_delay: float,
@@ -155,10 +161,11 @@ def _build_wait_strategy(
 ) -> wait_base:
     """Builds a Tenacity wait strategy.
 
-    With jitter=True: ``wait_random_exponential`` uniformly samples in
-    ``[0, min(multiplier * exp_base**n, max)]`` — true full-jitter.
+    With jitter=True, ``wait_random_exponential`` applies randomized
+    exponential backoff with an upper bound of ``max_delay``.
 
-    With jitter=False: deterministic ``wait_exponential``.
+    With jitter=False, ``wait_exponential`` applies deterministic
+    exponential backoff.
     """
     if jitter:
         return wait_random_exponential(
@@ -197,10 +204,9 @@ async def retry_async[R](
         initial_delay: Starting delay in seconds (used as ``multiplier``).
         backoff_factor: Base of the exponential backoff (``exp_base``).
         max_delay: Upper bound on the computed backoff delay (seconds).
-        jitter: If True, applies full-jitter via ``wait_random_exponential``
-            which samples uniformly in ``[0, min(computed_delay, max_delay)]``,
-            desynchronizing concurrent retrying callers. If False, uses
-            deterministic ``wait_exponential``.
+        jitter: If True, applies randomized exponential backoff via
+            ``wait_random_exponential`` to desynchronize concurrent retrying
+            callers. If False, uses deterministic ``wait_exponential``.
         retry_condition: Optional predicate ``(exc) -> bool``. Defaults to
             :func:`is_transient_error`.
         **kwargs: Keyword arguments forwarded to ``func``.
@@ -262,8 +268,9 @@ def retry_sync[R](
         initial_delay: Starting delay in seconds (used as ``multiplier``).
         backoff_factor: Base of the exponential backoff (``exp_base``).
         max_delay: Upper bound on the computed backoff delay (seconds).
-        jitter: If True, applies full-jitter via ``wait_random_exponential``
-            to spread retrying callers. If False, uses deterministic backoff.
+        jitter: If True, applies randomized exponential backoff via
+            ``wait_random_exponential`` to spread retrying callers. If False,
+            uses deterministic backoff.
         retry_condition: Optional predicate ``(exc) -> bool``.
         **kwargs: Keyword arguments forwarded to ``func``.
 
