@@ -51,7 +51,6 @@ class WorkspaceManager:
         else:
             try:
                 self.client = docker.from_env()
-                # Verify ping / connectivity to daemon
                 self.client.ping()
             except docker.errors.DockerException as exc:
                 logger.error("docker_daemon_unavailable", error=str(exc))
@@ -82,7 +81,6 @@ class WorkspaceManager:
         )
 
         try:
-            # 1. Ensure host directory exists and shallow clone repository
             host_dir.mkdir(parents=True, exist_ok=True)
             resolved_sha = shallow_clone(
                 repo_url=repo_url,
@@ -90,7 +88,6 @@ class WorkspaceManager:
                 commit_sha=commit_sha,
             )
 
-            # 2. Launch Docker container with host volume mounted to /workspace
             container = self.client.containers.run(
                 image=target_image,
                 name=container_name,
@@ -124,7 +121,6 @@ class WorkspaceManager:
             return workspace
 
         except WorkspaceError:
-            # Clean up host directory if clone or nested workspace error occurred
             shutil.rmtree(host_dir, ignore_errors=True)
             raise
         except docker.errors.DockerException as exc:
@@ -195,7 +191,6 @@ class WorkspaceManager:
                     },
                 ) from exc
 
-            # Delete host workspace directory
             if workspace.host_dir.exists():
                 shutil.rmtree(workspace.host_dir, ignore_errors=True)
 

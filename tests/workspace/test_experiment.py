@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import docker
+import docker.errors
 import git
 import pytest
 
@@ -16,7 +17,6 @@ def test_live_workspace_experiment(tmp_path: Path) -> None:
 
     Measures creation time (pull + clone) and verifies complete artifact cleanup.
     """
-    # 1. Setup a small git repository to clone
     source_repo_dir = tmp_path / "source_repo"
     source_repo_dir.mkdir()
     repo = git.Repo.init(source_repo_dir)
@@ -39,7 +39,6 @@ def test_live_workspace_experiment(tmp_path: Path) -> None:
         base_image="python:3.12-slim",
     )
 
-    # 2. Measure workspace creation (clone + container start)
     start_time = time.perf_counter()
     workspace = manager.create(repo_url=repo_url)
     creation_duration = time.perf_counter() - start_time
@@ -52,35 +51,28 @@ def test_live_workspace_experiment(tmp_path: Path) -> None:
     assert workspace.status == WorkspaceStatus.RUNNING
     assert workspace.host_dir.exists()
 
-    # Verify container is actually running in Docker engine
     container = docker_client.containers.get(workspace.container_id)
     assert container.status == "running"
 
-    # 3. List files in workspace
     files = manager.list_files(workspace.workspace_id)
     print(f"[EXPERIMENT] Files in workspace: {files}")
     assert any("README.md" in f for f in files)
     assert any("src_test.py" in f for f in files)
 
-    # 4. Run a command inside container
     cmd_res = manager.run_command(
         workspace.workspace_id, ["python", "/workspace/src_test.py"]
     )
     print(f"[EXPERIMENT] Command output: {cmd_res['stdout']}")
     assert "Inside isolated workspace" in str(cmd_res["stdout"])
 
-    # 5. Destroy workspace and verify cleanup
     manager.destroy(workspace.workspace_id)
     print("[EXPERIMENT] Workspace destroyed cleanly.")
 
-    # 6. Verify host directory removed
     assert not workspace.host_dir.exists()
 
-    # 7. Verify container removed from Docker engine
     with pytest.raises(docker.errors.NotFound):
         docker_client.containers.get(workspace.container_id)
 
-    # 8. Verify no leftover containers with label
     matching_containers = docker_client.containers.list(
         all=True,
         filters={"label": "managed-by=talos"},

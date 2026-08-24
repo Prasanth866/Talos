@@ -32,7 +32,6 @@ def shallow_clone(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # Clone with depth limit
         repo = git.Repo.clone_from(
             url=repo_url,
             to_path=str(target_dir),
@@ -43,7 +42,6 @@ def shallow_clone(
             try:
                 repo.git.checkout(commit_sha)
             except git.exc.GitError:
-                # If specific commit isn't in shallow history, fetch ref directly
                 repo.git.fetch("origin", commit_sha, depth=depth)
                 repo.git.checkout(commit_sha)
 

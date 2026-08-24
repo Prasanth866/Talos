@@ -7,7 +7,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import structlog
@@ -30,7 +30,7 @@ def extract_json_payload(text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    match = re.search(r"```(?:json)?\s*(\{.*?})\s*```", text, re.DOTALL)
     if match:
         try:
             parsed = json.loads(match.group(1))
@@ -277,10 +277,9 @@ class HTTPLLMClient(BaseLLMClient):
                         model=self.model,
                     )
                     await asyncio.sleep(wait_time)
-                    # Retry once after rate limit sleep
                     retry_resp = await client.post(url, json=payload, headers=headers)
                     if not retry_resp.is_error:
-                        return retry_resp.json()  # type: ignore[no-any-return]
+                        return cast(dict[str, Any], retry_resp.json())
 
             logger.error(
                 "llm_api_http_error",
@@ -292,7 +291,7 @@ class HTTPLLMClient(BaseLLMClient):
                 f"LLM API error ({response.status_code}): {error_message}"
             )
 
-        return response.json()  # type: ignore[no-any-return]
+        return cast(dict[str, Any], response.json())
 
     async def generate_response(
         self,
@@ -330,7 +329,6 @@ class HTTPLLMClient(BaseLLMClient):
         raw_usage = data.get("usage")
         call_usage = self.token_tracker.record_from_response(raw_usage)
 
-        # 1. Handle native OpenAI tool_calls
         tool_calls = msg.get("tool_calls")
         if tool_calls and isinstance(tool_calls, list):
             first_tc = tool_calls[0]
@@ -355,7 +353,6 @@ class HTTPLLMClient(BaseLLMClient):
                 latency_seconds=latency,
             )
 
-        # 2. Fall back to reasoning if content is empty
         if not content and reasoning:
             content = reasoning
 

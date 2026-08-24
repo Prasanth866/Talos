@@ -93,14 +93,11 @@ def test_destroy_removes_all_container_artifacts(
 
         manager.destroy(ws_id)
 
-        # Container stopped and removed
         mock_container = mock_docker_client.containers.get.return_value
         mock_container.stop.assert_called_once_with(timeout=5)
         mock_container.remove.assert_called_once_with(force=True)
 
-        # Host directory cleaned up
         assert not host_dir.exists()
-        # Workspace deregistered
         assert ws_id not in manager._workspaces
         assert ws.status == WorkspaceStatus.DESTROYED
 
@@ -129,7 +126,6 @@ def test_docker_errors_wrapped_as_workspace_error(
     tmp_path: Path, mock_docker_client: MagicMock
 ) -> None:
     """Unit test: Docker SDK errors are wrapped as WorkspaceError."""
-    # Test creation error wrapping
     mock_docker_client.containers.run.side_effect = docker.errors.APIError(
         "Docker API failure"
     )
@@ -237,7 +233,6 @@ def test_run_command_success_and_failure(
 
     mock_container = mock_docker_client.containers.get.return_value
 
-    # Success case
     mock_exec_success = MagicMock()
     mock_exec_success.exit_code = 0
     mock_exec_success.output = b"hello from container\n"
@@ -247,7 +242,6 @@ def test_run_command_success_and_failure(
     assert res["exit_code"] == 0
     assert res["stdout"] == "hello from container"
 
-    # Non-zero exit code case
     mock_exec_failure = MagicMock()
     mock_exec_failure.exit_code = 1
     mock_exec_failure.output = b"command error"

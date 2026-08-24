@@ -14,6 +14,7 @@ from tenacity import (
     wait_exponential,
     wait_random_exponential,
 )
+from tenacity.wait import wait_base
 
 logger = structlog.get_logger(__name__)
 
@@ -24,8 +25,16 @@ def _before_sleep_log(retry_state: RetryCallState) -> None:
     Emits a structured ``retry_sleeping`` warning that inherits all bound
     structlog contextvars (e.g. ``task_id``) — something stdlib
     ``before_sleep_log`` cannot do.
+
+    Only the exception branch is handled: retries are triggered by
+    ``retry_if_exception``, so a successful-result outcome that still
+    triggers a retry cannot occur in normal usage.
     """
     if retry_state.outcome is None or retry_state.next_action is None:
+        return
+
+    exc = retry_state.outcome.exception()
+    if exc is None:
         return
 
     fn_name = (
@@ -33,27 +42,15 @@ def _before_sleep_log(retry_state: RetryCallState) -> None:
         or getattr(retry_state.fn, "__name__", None)
         or "<unknown>"
     )
-    sleep_for = retry_state.next_action.sleep
 
-    if retry_state.outcome.failed:
-        exc = retry_state.outcome.exception()
-        logger.warning(
-            "retry_sleeping",
-            fn=fn_name,
-            attempt=retry_state.attempt_number,
-            sleep_seconds=round(sleep_for, 3),
-            exc_type=type(exc).__name__,
-            exc_msg=str(exc),
-        )
-    else:
-        result = retry_state.outcome.result()
-        logger.warning(
-            "retry_sleeping",
-            fn=fn_name,
-            attempt=retry_state.attempt_number,
-            sleep_seconds=round(sleep_for, 3),
-            returned=repr(result),
-        )
+    logger.warning(
+        "retry_sleeping",
+        fn=fn_name,
+        attempt=retry_state.attempt_number,
+        sleep_seconds=round(retry_state.next_action.sleep, 3),
+        exc_type=type(exc).__name__,
+        exc_msg=str(exc),
+    )
 
 
 class NonRetryableError(Exception):
@@ -129,13 +126,33 @@ def compute_backoff_delay(
     return delay
 
 
+def _validate_retry_parameters(
+    *,
+    max_retries: int,
+    initial_delay: float,
+    backoff_factor: float,
+    max_delay: float,
+) -> None:
+    """Validates retry configuration, raising ValueError for nonsensical inputs."""
+    if max_retries < 0:
+        raise ValueError(f"max_retries must be >= 0, got {max_retries}")
+    if initial_delay < 0:
+        raise ValueError(f"initial_delay must be >= 0, got {initial_delay}")
+    if backoff_factor < 1:
+        raise ValueError(
+            f"backoff_factor must be >= 1 for exponential backoff, got {backoff_factor}"
+        )
+    if max_delay < 0:
+        raise ValueError(f"max_delay must be >= 0, got {max_delay}")
+
+
 def _build_wait_strategy(
     *,
     initial_delay: float,
     backoff_factor: float,
     max_delay: float,
     jitter: bool,
-) -> wait_exponential | wait_random_exponential:
+) -> wait_base:
     """Builds a Tenacity wait strategy.
 
     With jitter=True: ``wait_random_exponential`` uniformly samples in
@@ -196,6 +213,12 @@ async def retry_async[R](
         or the error is non-retryable.
     """
     should_retry = retry_condition or is_transient_error
+    _validate_retry_parameters(
+        max_retries=max_retries,
+        initial_delay=initial_delay,
+        backoff_factor=backoff_factor,
+        max_delay=max_delay,
+    )
     wait_strategy = _build_wait_strategy(
         initial_delay=initial_delay,
         backoff_factor=backoff_factor,
@@ -252,6 +275,12 @@ def retry_sync[R](
         or the error is non-retryable.
     """
     should_retry = retry_condition or is_transient_error
+    _validate_retry_parameters(
+        max_retries=max_retries,
+        initial_delay=initial_delay,
+        backoff_factor=backoff_factor,
+        max_delay=max_delay,
+    )
     wait_strategy = _build_wait_strategy(
         initial_delay=initial_delay,
         backoff_factor=backoff_factor,

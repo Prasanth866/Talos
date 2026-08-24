@@ -145,3 +145,20 @@ def test_is_transient_error_http_status_codes() -> None:
     assert is_transient_error(DummyHTTPError(400)) is False
     assert is_transient_error(DummyHTTPError(401)) is False
     assert is_transient_error(DummyHTTPError(404)) is False
+
+
+def test_retry_parameter_validation() -> None:
+    """Verifies that invalid configuration parameters raise ValueError."""
+    dummy = MagicMock()
+
+    with pytest.raises(ValueError, match="max_retries must be >= 0"):
+        retry_sync(dummy, max_retries=-1)
+
+    with pytest.raises(ValueError, match="initial_delay must be >= 0"):
+        retry_sync(dummy, initial_delay=-0.5)
+
+    with pytest.raises(ValueError, match="backoff_factor must be >= 1"):
+        retry_sync(dummy, backoff_factor=0.5)
+
+    with pytest.raises(ValueError, match="max_delay must be >= 0"):
+        retry_sync(dummy, max_delay=-1.0)

@@ -35,7 +35,7 @@ async def lifespan(fast_app: FastAPI) -> AsyncGenerator[None]:
     fast_app.state.db = db
 
     async with db.engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn))
 
     async with db.session_factory() as session:
         recovered = await repository.recover_interrupted(session)
