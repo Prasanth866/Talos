@@ -1,26 +1,20 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import random
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import structlog
 from tenacity import (
     AsyncRetrying,
-    RetryError,
     Retrying,
     before_sleep_log,
     retry_if_exception,
     stop_after_attempt,
     wait_exponential,
-    wait_random,
+    wait_random_exponential,
 )
 
-logger = structlog.get_logger(__name__)
-
-# tenacity uses the standard logging module for its before_sleep hook.
 _std_logger = logging.getLogger(__name__)
 
 
@@ -48,8 +42,6 @@ def is_transient_error(exc: BaseException) -> bool:
     transient_types = (
         TimeoutError,
         ConnectionError,
-        asyncio.TimeoutError,
-        OSError,
     )
     if isinstance(exc, transient_types):
         return True
@@ -83,16 +75,47 @@ def compute_backoff_delay(
     max_delay: float = 60.0,
     jitter: bool = True,
 ) -> float:
-    """Calculates exponential backoff delay with optional randomized jitter.
+    """Calculates exponential backoff delay with optional full-jitter [0, delay].
 
     Kept for compatibility and direct use where callers need to compute a
     delay value without executing a retry loop.
+
+    Note: This is a standalone helper. The retry functions use Tenacity's
+    ``wait_random_exponential`` for jitter (true full-jitter over [0, delay])
+    or ``wait_exponential`` for deterministic backoff.
     """
     calculated = initial_delay * (backoff_factor**attempt)
     delay = min(calculated, max_delay)
     if jitter and delay > 0:
         delay = random.uniform(0, delay)  # noqa: S311
     return delay
+
+
+def _build_wait_strategy(
+    *,
+    initial_delay: float,
+    backoff_factor: float,
+    max_delay: float,
+    jitter: bool,
+) -> wait_exponential | wait_random_exponential:
+    """Builds a Tenacity wait strategy.
+
+    With jitter=True: ``wait_random_exponential`` uniformly samples in
+    ``[0, min(multiplier * exp_base**n, max)]`` — true full-jitter.
+
+    With jitter=False: deterministic ``wait_exponential``.
+    """
+    if jitter:
+        return wait_random_exponential(
+            multiplier=initial_delay,
+            exp_base=backoff_factor,
+            max=max_delay,
+        )
+    return wait_exponential(
+        multiplier=initial_delay,
+        exp_base=backoff_factor,
+        max=max_delay,
+    )
 
 
 async def retry_async[R](
@@ -116,11 +139,13 @@ async def retry_async[R](
         *args: Positional arguments forwarded to ``func``.
         max_retries: Maximum number of retry attempts (not counting the initial
             attempt). Total calls = max_retries + 1.
-        initial_delay: Starting delay in seconds before the first retry.
-        backoff_factor: Multiplier applied to the delay on each attempt.
+        initial_delay: Starting delay in seconds (used as ``multiplier``).
+        backoff_factor: Base of the exponential backoff (``exp_base``).
         max_delay: Upper bound on the computed backoff delay (seconds).
-        jitter: If True, applies full-jitter [0, delay] to desynchronise
-            concurrent retrying callers.
+        jitter: If True, applies full-jitter via ``wait_random_exponential``
+            which samples uniformly in ``[0, min(computed_delay, max_delay)]``,
+            desynchronizing concurrent retrying callers. If False, uses
+            deterministic ``wait_exponential``.
         retry_condition: Optional predicate ``(exc) -> bool``. Defaults to
             :func:`is_transient_error`.
         **kwargs: Keyword arguments forwarded to ``func``.
@@ -133,28 +158,22 @@ async def retry_async[R](
         or the error is non-retryable.
     """
     should_retry = retry_condition or is_transient_error
-
-    jitter_val = initial_delay if jitter else 0
-    jitter_wait = wait_random(0, jitter_val) if jitter else wait_random(0, 0)
-    wait_strategy = (
-        wait_exponential(
-            multiplier=initial_delay, exp_base=backoff_factor, max=max_delay
-        )
-        + jitter_wait
+    wait_strategy = _build_wait_strategy(
+        initial_delay=initial_delay,
+        backoff_factor=backoff_factor,
+        max_delay=max_delay,
+        jitter=jitter,
     )
 
-    try:
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(max_retries + 1),
-            wait=wait_strategy,
-            retry=retry_if_exception(should_retry),
-            before_sleep=before_sleep_log(_std_logger, logging.INFO),
-            reraise=True,
-        ):
-            with attempt:
-                return await func(*args, **kwargs)
-    except RetryError as exc:
-        raise exc.last_attempt.exception() from exc  # type: ignore[misc]
+    async for attempt in AsyncRetrying(
+        stop=stop_after_attempt(max_retries + 1),
+        wait=wait_strategy,
+        retry=retry_if_exception(should_retry),
+        before_sleep=before_sleep_log(_std_logger, logging.INFO),
+        reraise=True,
+    ):
+        with attempt:
+            return await func(*args, **kwargs)
 
     raise RuntimeError("Unexpected end of retry loop without return or exception.")
 
@@ -179,10 +198,11 @@ def retry_sync[R](
         func: Synchronous callable to execute.
         *args: Positional arguments forwarded to ``func``.
         max_retries: Maximum number of retry attempts after the initial call.
-        initial_delay: Starting delay in seconds before the first retry.
-        backoff_factor: Multiplier applied to the delay on each attempt.
+        initial_delay: Starting delay in seconds (used as ``multiplier``).
+        backoff_factor: Base of the exponential backoff (``exp_base``).
         max_delay: Upper bound on the computed backoff delay (seconds).
-        jitter: If True, applies full-jitter to spread retrying callers.
+        jitter: If True, applies full-jitter via ``wait_random_exponential``
+            to spread retrying callers. If False, uses deterministic backoff.
         retry_condition: Optional predicate ``(exc) -> bool``.
         **kwargs: Keyword arguments forwarded to ``func``.
 
@@ -194,26 +214,21 @@ def retry_sync[R](
         or the error is non-retryable.
     """
     should_retry = retry_condition or is_transient_error
-    jitter_val = initial_delay if jitter else 0
-    jitter_wait = wait_random(0, jitter_val) if jitter else wait_random(0, 0)
-    wait_strategy = (
-        wait_exponential(
-            multiplier=initial_delay, exp_base=backoff_factor, max=max_delay
-        )
-        + jitter_wait
+    wait_strategy = _build_wait_strategy(
+        initial_delay=initial_delay,
+        backoff_factor=backoff_factor,
+        max_delay=max_delay,
+        jitter=jitter,
     )
 
-    try:
-        for attempt in Retrying(
-            stop=stop_after_attempt(max_retries + 1),
-            wait=wait_strategy,
-            retry=retry_if_exception(should_retry),
-            before_sleep=before_sleep_log(_std_logger, logging.INFO),
-            reraise=True,
-        ):
-            with attempt:
-                return func(*args, **kwargs)
-    except RetryError as exc:
-        raise exc.last_attempt.exception() from exc  # type: ignore[misc]
+    for attempt in Retrying(
+        stop=stop_after_attempt(max_retries + 1),
+        wait=wait_strategy,
+        retry=retry_if_exception(should_retry),
+        before_sleep=before_sleep_log(_std_logger, logging.INFO),
+        reraise=True,
+    ):
+        with attempt:
+            return func(*args, **kwargs)
 
     raise RuntimeError("Unexpected end of retry loop without return or exception.")
