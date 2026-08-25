@@ -80,7 +80,7 @@ def test_live_workspace_experiment(tmp_path: Path) -> None:
 
     matching_containers = docker_client.containers.list(
         all=True,
-        filters={"label": "managed-by=talos"},
+        filters={"name": workspace.container_name},
     )
     assert len(matching_containers) == 0
     print("[EXPERIMENT] All Docker resources verified cleaned up.")

@@ -367,6 +367,7 @@ class WorkspaceManager:
         stop_event = threading.Event()
 
         def _reader_thread() -> None:
+            stream = None
             try:
                 stream = self.client.api.exec_start(exec_id, stream=True, demux=True)
                 for stdout_chunk, stderr_chunk in stream:
@@ -383,6 +384,9 @@ class WorkspaceManager:
             except Exception as exc:
                 loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
             finally:
+                if stream is not None and hasattr(stream, "close"):
+                    with contextlib.suppress(Exception):
+                        stream.close()
                 loop.call_soon_threadsafe(queue.put_nowait, ("eof", None))
 
         reader = threading.Thread(
@@ -403,7 +407,11 @@ class WorkspaceManager:
                     f"fi; "
                     f"rm -f {pid_file}"
                 )
-                container.exec_run(["/bin/sh", "-c", kill_script])
+                threading.Thread(
+                    target=lambda: container.exec_run(["/bin/sh", "-c", kill_script]),
+                    daemon=True,
+                    name=f"exec-kill-{exec_token}",
+                ).start()
             except Exception as exc:
                 logger.debug(
                     "workspace_exec_kill_suppressed_error",

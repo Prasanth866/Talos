@@ -1,6 +1,8 @@
 import asyncio
+import os
 import re
 import shlex
+import sys
 from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
@@ -145,6 +147,12 @@ class ShellTool:
         cmd_string = f"{executable} {' '.join(cmd_args)}"
         self._check_command_safety(cmd_string, executable)
 
+        env = os.environ.copy()
+        venv_bin = str(Path(sys.executable).parent)
+        current_path = env.get("PATH", "")
+        if venv_bin not in current_path.split(os.pathsep):
+            env["PATH"] = f"{venv_bin}{os.pathsep}{current_path}"
+
         process: asyncio.subprocess.Process | None = None
         try:
             created_process = await asyncio.create_subprocess_exec(
@@ -153,6 +161,7 @@ class ShellTool:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.working_dir,
+                env=env,
             )
             process = created_process
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
