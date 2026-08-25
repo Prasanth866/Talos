@@ -106,7 +106,6 @@ class WorkspaceManager:
                 commit_sha=commit_sha,
             )
 
-            # Ensure host_dir is readable and writable by non-root container users
             with contextlib.suppress(OSError):
                 host_dir.chmod(0o777)
                 for item in host_dir.rglob("*"):
