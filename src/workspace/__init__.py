@@ -11,11 +11,18 @@ from src.workspace.exceptions import (
 )
 from src.workspace.git_utils import shallow_clone
 from src.workspace.manager import WorkspaceManager
-from src.workspace.models import Workspace, WorkspaceStatus
+from src.workspace.models import (
+    CommandOutputLine,
+    SentinelType,
+    Workspace,
+    WorkspaceStatus,
+)
 
 __all__ = [
+    "CommandOutputLine",
     "DockerDaemonError",
     "GitCloneError",
+    "SentinelType",
     "Workspace",
     "WorkspaceCreationError",
     "WorkspaceDestroyError",

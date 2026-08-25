@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import shlex
 import shutil
 import tempfile
+import threading
+import time
 import uuid
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import docker
@@ -18,7 +24,7 @@ from src.workspace.exceptions import (
     WorkspaceNotFoundError,
 )
 from src.workspace.git_utils import shallow_clone
-from src.workspace.models import Workspace, WorkspaceStatus
+from src.workspace.models import CommandOutputLine, Workspace, WorkspaceStatus
 
 logger = structlog.get_logger(__name__)
 
@@ -313,3 +319,165 @@ class WorkspaceManager:
         stdout = str(result.get("stdout", ""))
         lines = [line.strip() for line in stdout.splitlines() if line.strip()]
         return lines
+
+    async def execute_command(
+        self,
+        workspace_id: str,
+        cmd: str | list[str],
+        timeout_s: float = 30.0,
+        max_output_bytes: int = 1024 * 1024,
+        workdir: str = "/workspace",
+    ) -> AsyncGenerator[CommandOutputLine]:
+        """Executes a command asynchronously inside workspace container with streaming,
+
+        output capping (at max_output_bytes, default 1MB), and timeout enforcement.
+        Yields CommandOutputLine instances and sentinel markers (TRUNCATED, TIMEOUT).
+        """
+        workspace = self.get(workspace_id)
+        try:
+            container = self.client.containers.get(workspace.container_id)
+        except docker.errors.DockerException as exc:
+            raise WorkspaceExecutionError(
+                message=f"Failed to access workspace container: {exc}",
+                command=str(cmd),
+                details={"workspace_id": workspace_id, "error": str(exc)},
+            ) from exc
+
+        exec_token = uuid.uuid4().hex[:12]
+        pid_file = f"/tmp/talos_exec_{exec_token}.pid"  # noqa: S108
+        cmd_str = shlex.join(cmd) if isinstance(cmd, list) else cmd.strip()
+        wrapped_cmd = f"echo $$ > {pid_file}; exec {cmd_str}"
+
+        try:
+            exec_inst = self.client.api.exec_create(
+                container.id,
+                cmd=["/bin/sh", "-c", wrapped_cmd],
+                workdir=workdir,
+            )
+            exec_id = exec_inst["Id"]
+        except docker.errors.DockerException as exc:
+            raise WorkspaceExecutionError(
+                message=f"Docker exec_create failed for workspace: {exc}",
+                command=cmd_str,
+                details={"workspace_id": workspace_id, "error": str(exc)},
+            ) from exc
+
+        queue: asyncio.Queue[tuple[str, bytes | Exception | None]] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        stop_event = threading.Event()
+
+        def _reader_thread() -> None:
+            try:
+                stream = self.client.api.exec_start(exec_id, stream=True, demux=True)
+                for stdout_chunk, stderr_chunk in stream:
+                    if stop_event.is_set():
+                        break
+                    if stdout_chunk:
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait, ("stdout", stdout_chunk)
+                        )
+                    if stderr_chunk:
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait, ("stderr", stderr_chunk)
+                        )
+            except Exception as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, ("eof", None))
+
+        reader = threading.Thread(
+            target=_reader_thread,
+            daemon=True,
+            name=f"exec-reader-{exec_token}",
+        )
+        reader.start()
+
+        def _kill_process_tree() -> None:
+            stop_event.set()
+            try:
+                kill_script = (
+                    f"PID=$(cat {pid_file} 2>/dev/null); "
+                    f'if [ -n "$PID" ]; then '
+                    f'  kill -TERM "$PID" 2>/dev/null || true; '
+                    f'  kill -KILL "$PID" 2>/dev/null || true; '
+                    f"fi; "
+                    f"rm -f {pid_file}"
+                )
+                container.exec_run(["/bin/sh", "-c", kill_script])
+            except Exception as exc:
+                logger.debug(
+                    "workspace_exec_kill_suppressed_error",
+                    workspace_id=workspace_id,
+                    error=str(exc),
+                )
+
+        total_bytes = 0
+        stdout_buf = ""
+        stderr_buf = ""
+        start_time = time.monotonic()
+
+        try:
+            while True:
+                elapsed = time.monotonic() - start_time
+                remaining = timeout_s - elapsed
+                if remaining <= 0:
+                    _kill_process_tree()
+                    yield CommandOutputLine.timeout()
+                    return
+
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=remaining)
+                except TimeoutError:
+                    _kill_process_tree()
+                    yield CommandOutputLine.timeout()
+                    return
+
+                kind, data = item
+                if kind == "eof":
+                    break
+                if kind == "error":
+                    if isinstance(data, Exception):
+                        raise WorkspaceExecutionError(
+                            message=f"Stream reading error: {data}",
+                            command=cmd_str,
+                            details={"error": str(data)},
+                        ) from data
+                    break
+                if kind in ("stdout", "stderr") and isinstance(data, bytes):
+                    chunk_len = len(data)
+                    if total_bytes + chunk_len > max_output_bytes:
+                        _kill_process_tree()
+                        yield CommandOutputLine.truncated()
+                        return
+
+                    total_bytes += chunk_len
+                    text = data.decode("utf-8", errors="replace")
+
+                    if kind == "stdout":
+                        stdout_buf += text
+                        if "\n" in stdout_buf:
+                            lines = stdout_buf.split("\n")
+                            stdout_buf = lines.pop()
+                            for line in lines:
+                                yield CommandOutputLine(
+                                    line=line.rstrip("\r"), stream="stdout"
+                                )
+                    else:
+                        stderr_buf += text
+                        if "\n" in stderr_buf:
+                            lines = stderr_buf.split("\n")
+                            stderr_buf = lines.pop()
+                            for line in lines:
+                                yield CommandOutputLine(
+                                    line=line.rstrip("\r"), stream="stderr"
+                                )
+
+            if stdout_buf:
+                yield CommandOutputLine(line=stdout_buf.rstrip("\r"), stream="stdout")
+            if stderr_buf:
+                yield CommandOutputLine(line=stderr_buf.rstrip("\r"), stream="stderr")
+
+        finally:
+            stop_event.set()
+            with contextlib.suppress(Exception):
+                container.exec_run(["/bin/sh", "-c", f"rm -f {pid_file}"])

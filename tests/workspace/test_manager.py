@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import docker.errors
@@ -8,8 +9,10 @@ import git.exc
 import pytest
 
 from src.workspace import (
+    CommandOutputLine,
     DockerDaemonError,
     GitCloneError,
+    SentinelType,
     Workspace,
     WorkspaceCreationError,
     WorkspaceDestroyError,
@@ -252,3 +255,129 @@ def test_run_command_success_and_failure(
 
     assert exc_info.value.exit_code == 1
     assert "failed with exit code 1" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_execute_command_streams_output(
+    tmp_path: Path, mock_docker_client: MagicMock
+) -> None:
+    """Unit test: command output is streamed as CommandOutputLine structs."""
+    manager = WorkspaceManager(
+        docker_client=mock_docker_client,
+        workspace_root=tmp_path,
+    )
+
+    with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
+        ws = manager.create("https://github.com/example/repo.git")
+
+    mock_docker_client.api.exec_create.return_value = {"Id": "exec_abc123"}
+    mock_docker_client.api.exec_start.return_value = iter(
+        [
+            (b"first line\nsecond line\n", None),
+            (None, b"stderr error line\n"),
+            (b"third line\n", None),
+        ]
+    )
+
+    lines: list[CommandOutputLine] = []
+    async for item in manager.execute_command(ws.workspace_id, "echo test"):
+        lines.append(item)
+
+    assert len(lines) == 4
+    assert lines[0] == CommandOutputLine(
+        line="first line",
+        stream="stdout",
+        is_sentinel=False,
+        sentinel_type=None,
+    )
+    assert lines[1] == CommandOutputLine(
+        line="second line",
+        stream="stdout",
+        is_sentinel=False,
+        sentinel_type=None,
+    )
+    assert lines[2] == CommandOutputLine(
+        line="stderr error line",
+        stream="stderr",
+        is_sentinel=False,
+        sentinel_type=None,
+    )
+    assert lines[3] == CommandOutputLine(
+        line="third line",
+        stream="stdout",
+        is_sentinel=False,
+        sentinel_type=None,
+    )
+    assert all(not line.is_sentinel for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_execute_command_output_capping_triggers_truncated_sentinel(
+    tmp_path: Path, mock_docker_client: MagicMock
+) -> None:
+    """Unit test: output exceeding max_output_bytes triggers TRUNCATED sentinel."""
+    manager = WorkspaceManager(
+        docker_client=mock_docker_client,
+        workspace_root=tmp_path,
+    )
+
+    with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
+        ws = manager.create("https://github.com/example/repo.git")
+
+    # Yield chunks exceeding 100 bytes limit
+    mock_docker_client.api.exec_start.return_value = iter(
+        [
+            (b"A" * 60 + b"\n", None),
+            (b"B" * 60 + b"\n", None),
+            (b"C" * 60 + b"\n", None),
+        ]
+    )
+
+    lines: list[CommandOutputLine] = []
+    async for item in manager.execute_command(
+        ws.workspace_id, "generate_large_output", max_output_bytes=100
+    ):
+        lines.append(item)
+
+    assert len(lines) >= 1
+    last_line = lines[-1]
+    assert last_line.is_sentinel is True
+    assert last_line.sentinel_type == SentinelType.TRUNCATED
+    assert last_line.line == "[TRUNCATED]"
+
+
+@pytest.mark.asyncio
+async def test_execute_command_timeout_triggers_timeout_sentinel(
+    tmp_path: Path, mock_docker_client: MagicMock
+) -> None:
+    """Unit test: command exceeding timeout triggers TIMEOUT sentinel."""
+    import time
+
+    manager = WorkspaceManager(
+        docker_client=mock_docker_client,
+        workspace_root=tmp_path,
+    )
+
+    with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
+        ws = manager.create("https://github.com/example/repo.git")
+
+    mock_docker_client.api.exec_create.return_value = {"Id": "exec_abc123"}
+
+    def slow_stream() -> Any:
+        yield (b"initial output\n", None)
+        time.sleep(0.5)
+        yield (b"should not arrive\n", None)
+
+    mock_docker_client.api.exec_start.return_value = slow_stream()
+
+    lines: list[CommandOutputLine] = []
+    async for item in manager.execute_command(
+        ws.workspace_id, "sleep 10", timeout_s=0.08
+    ):
+        lines.append(item)
+
+    assert len(lines) == 2
+    assert lines[0].line == "initial output"
+    assert lines[1].is_sentinel is True
+    assert lines[1].sentinel_type == SentinelType.TIMEOUT
+    assert lines[1].line == "[TIMEOUT]"
