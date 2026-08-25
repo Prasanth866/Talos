@@ -324,7 +324,6 @@ async def test_execute_command_output_capping_triggers_truncated_sentinel(
     with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
         ws = manager.create("https://github.com/example/repo.git")
 
-    # Yield chunks exceeding 100 bytes limit
     mock_docker_client.api.exec_start.return_value = iter(
         [
             (b"A" * 60 + b"\n", None),
