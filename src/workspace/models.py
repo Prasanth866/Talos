@@ -54,6 +54,22 @@ class CommandOutputLine:
         )
 
 
+@dataclass(frozen=True)
+class ContainerSecurityConfig:
+    """Configuration for Docker sandbox container security hardening."""
+
+    mem_limit: str = "512m"
+    cpu_quota: int = 100000
+    cpu_period: int = 100000
+    pids_limit: int = 256
+    read_only: bool = True
+    network_mode: str = "none"
+    user: str = "1000:1000"
+    tmpfs: dict[str, str] = field(
+        default_factory=lambda: {"/tmp": "rw,noexec,nosuid,size=64m"}  # noqa: S108
+    )
+
+
 @dataclass
 class Workspace:
     """Represents an isolated container workspace environment."""
@@ -65,5 +81,8 @@ class Workspace:
     commit_sha: str | None
     host_dir: Path
     status: WorkspaceStatus = WorkspaceStatus.RUNNING
+    security_config: ContainerSecurityConfig = field(
+        default_factory=ContainerSecurityConfig
+    )
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)

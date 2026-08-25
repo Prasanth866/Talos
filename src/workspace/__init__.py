@@ -13,6 +13,7 @@ from src.workspace.git_utils import shallow_clone
 from src.workspace.manager import WorkspaceManager
 from src.workspace.models import (
     CommandOutputLine,
+    ContainerSecurityConfig,
     SentinelType,
     Workspace,
     WorkspaceStatus,
@@ -20,6 +21,7 @@ from src.workspace.models import (
 
 __all__ = [
     "CommandOutputLine",
+    "ContainerSecurityConfig",
     "DockerDaemonError",
     "GitCloneError",
     "SentinelType",

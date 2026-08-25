@@ -24,7 +24,12 @@ from src.workspace.exceptions import (
     WorkspaceNotFoundError,
 )
 from src.workspace.git_utils import shallow_clone
-from src.workspace.models import CommandOutputLine, Workspace, WorkspaceStatus
+from src.workspace.models import (
+    CommandOutputLine,
+    ContainerSecurityConfig,
+    Workspace,
+    WorkspaceStatus,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -41,6 +46,7 @@ class WorkspaceManager:
         base_image: str = DEFAULT_BASE_IMAGE,
         workspace_root: Path | None = None,
         container_labels: dict[str, str] | None = None,
+        default_security_config: ContainerSecurityConfig | None = None,
     ) -> None:
         self.base_image = base_image
         self.workspace_root = (
@@ -50,6 +56,9 @@ class WorkspaceManager:
         ).resolve()
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         self.container_labels = dict(container_labels or DEFAULT_WORKSPACE_LABELS)
+        self.default_security_config = (
+            default_security_config or ContainerSecurityConfig()
+        )
         self._workspaces: dict[str, Workspace] = {}
 
         if docker_client is not None:
@@ -71,12 +80,14 @@ class WorkspaceManager:
         commit_sha: str | None = None,
         image: str | None = None,
         env: dict[str, str] | None = None,
+        security_config: ContainerSecurityConfig | None = None,
     ) -> Workspace:
         """Creates an isolated container workspace and shallow-clones the repo."""
         workspace_id = uuid.uuid4().hex
         container_name = f"talos-ws-{workspace_id[:12]}"
         host_dir = self.workspace_root / workspace_id
         target_image = image or self.base_image
+        sec_cfg = security_config or self.default_security_config
 
         logger.info(
             "workspace_create_started",
@@ -84,6 +95,7 @@ class WorkspaceManager:
             repo_url=repo_url,
             commit_sha=commit_sha,
             image=target_image,
+            security_config=sec_cfg,
         )
 
         try:
@@ -93,6 +105,15 @@ class WorkspaceManager:
                 target_dir=host_dir,
                 commit_sha=commit_sha,
             )
+
+            # Ensure host_dir is readable and writable by non-root container users
+            with contextlib.suppress(OSError):
+                host_dir.chmod(0o777)
+                for item in host_dir.rglob("*"):
+                    if item.is_dir():
+                        item.chmod(0o777)
+                    else:
+                        item.chmod(0o666)
 
             container = self.client.containers.run(
                 image=target_image,
@@ -104,6 +125,14 @@ class WorkspaceManager:
                 environment=env or {},
                 labels=self.container_labels,
                 remove=False,
+                mem_limit=sec_cfg.mem_limit,
+                cpu_quota=sec_cfg.cpu_quota,
+                cpu_period=sec_cfg.cpu_period,
+                pids_limit=sec_cfg.pids_limit,
+                read_only=sec_cfg.read_only,
+                tmpfs=sec_cfg.tmpfs,
+                network_mode=sec_cfg.network_mode,
+                user=sec_cfg.user,
             )
 
             workspace = Workspace(
@@ -114,6 +143,7 @@ class WorkspaceManager:
                 commit_sha=resolved_sha,
                 host_dir=host_dir,
                 status=WorkspaceStatus.RUNNING,
+                security_config=sec_cfg,
                 metadata={"image": target_image},
             )
             self._workspaces[workspace_id] = workspace

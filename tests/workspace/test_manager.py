@@ -10,6 +10,7 @@ import pytest
 
 from src.workspace import (
     CommandOutputLine,
+    ContainerSecurityConfig,
     DockerDaemonError,
     GitCloneError,
     SentinelType,
@@ -380,3 +381,168 @@ async def test_execute_command_timeout_triggers_timeout_sentinel(
     assert lines[1].is_sentinel is True
     assert lines[1].sentinel_type == SentinelType.TIMEOUT
     assert lines[1].line == "[TIMEOUT]"
+
+
+def test_container_hardening_default_security_config_applied(
+    tmp_path: Path, mock_docker_client: MagicMock
+) -> None:
+    """Unit test: verifies default hardening parameters are passed to containers.run."""
+    manager = WorkspaceManager(
+        docker_client=mock_docker_client,
+        workspace_root=tmp_path,
+    )
+
+    with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
+        ws = manager.create("https://github.com/example/repo.git")
+
+    call_kwargs = mock_docker_client.containers.run.call_args.kwargs
+    assert call_kwargs["mem_limit"] == "512m"
+    assert call_kwargs["cpu_quota"] == 100000
+    assert call_kwargs["cpu_period"] == 100000
+    assert call_kwargs["pids_limit"] == 256
+    assert call_kwargs["read_only"] is True
+    assert call_kwargs["tmpfs"] == {
+        "/tmp": "rw,noexec,nosuid,size=64m",  # noqa: S108
+    }
+
+    assert call_kwargs["network_mode"] == "none"
+    assert call_kwargs["user"] == "1000:1000"
+
+    assert ws.security_config.mem_limit == "512m"
+    assert ws.security_config.pids_limit == 256
+    assert ws.security_config.read_only is True
+    assert ws.security_config.network_mode == "none"
+    assert ws.security_config.user == "1000:1000"
+
+
+def test_container_hardening_custom_security_config_override(
+    tmp_path: Path, mock_docker_client: MagicMock
+) -> None:
+    """Unit test: verifies custom SecurityConfig override on create()."""
+    manager = WorkspaceManager(
+        docker_client=mock_docker_client,
+        workspace_root=tmp_path,
+    )
+
+    custom_cfg = ContainerSecurityConfig(
+        mem_limit="1024m",
+        cpu_quota=200000,
+        cpu_period=100000,
+        pids_limit=512,
+        read_only=False,
+        network_mode="bridge",
+        user="2000:2000",
+        tmpfs={"/tmp": "size=128m"},  # noqa: S108
+    )
+
+    with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
+        ws = manager.create(
+            "https://github.com/example/repo.git",
+            security_config=custom_cfg,
+        )
+
+    call_kwargs = mock_docker_client.containers.run.call_args.kwargs
+    assert call_kwargs["mem_limit"] == "1024m"
+    assert call_kwargs["cpu_quota"] == 200000
+    assert call_kwargs["pids_limit"] == 512
+    assert call_kwargs["read_only"] is False
+    assert call_kwargs["network_mode"] == "bridge"
+    assert call_kwargs["user"] == "2000:2000"
+    assert call_kwargs["tmpfs"] == {"/tmp": "size=128m"}  # noqa: S108
+
+    assert ws.security_config == custom_cfg
+
+
+def test_container_hardening_mem_limit(
+    tmp_path: Path, mock_docker_client: MagicMock
+) -> None:
+    """Unit test: container respects mem_limit configuration."""
+    custom_cfg = ContainerSecurityConfig(mem_limit="256m")
+    manager = WorkspaceManager(
+        docker_client=mock_docker_client,
+        workspace_root=tmp_path,
+        default_security_config=custom_cfg,
+    )
+
+    with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
+        ws = manager.create("https://github.com/example/repo.git")
+
+    call_kwargs = mock_docker_client.containers.run.call_args.kwargs
+    assert call_kwargs["mem_limit"] == "256m"
+    assert ws.security_config.mem_limit == "256m"
+
+
+def test_container_hardening_pids_limit(
+    tmp_path: Path, mock_docker_client: MagicMock
+) -> None:
+    """Unit test: container respects pids_limit configuration."""
+    custom_cfg = ContainerSecurityConfig(pids_limit=128)
+    manager = WorkspaceManager(
+        docker_client=mock_docker_client,
+        workspace_root=tmp_path,
+    )
+
+    with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
+        ws = manager.create(
+            "https://github.com/example/repo.git",
+            security_config=custom_cfg,
+        )
+
+    call_kwargs = mock_docker_client.containers.run.call_args.kwargs
+    assert call_kwargs["pids_limit"] == 128
+    assert ws.security_config.pids_limit == 128
+
+
+def test_container_hardening_read_only_fs(
+    tmp_path: Path, mock_docker_client: MagicMock
+) -> None:
+    """Unit test: filesystem is read-only outside /workspace."""
+    manager = WorkspaceManager(
+        docker_client=mock_docker_client,
+        workspace_root=tmp_path,
+    )
+
+    with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
+        ws = manager.create("https://github.com/example/repo.git")
+
+    call_kwargs = mock_docker_client.containers.run.call_args.kwargs
+    assert call_kwargs["read_only"] is True
+    assert call_kwargs["volumes"][str(ws.host_dir)]["bind"] == "/workspace"
+    assert call_kwargs["volumes"][str(ws.host_dir)]["mode"] == "rw"
+    assert call_kwargs["tmpfs"] == {
+        "/tmp": "rw,noexec,nosuid,size=64m",  # noqa: S108
+    }
+
+
+def test_container_hardening_network_isolation(
+    tmp_path: Path, mock_docker_client: MagicMock
+) -> None:
+    """Unit test: network egress is disabled via network_mode none."""
+    manager = WorkspaceManager(
+        docker_client=mock_docker_client,
+        workspace_root=tmp_path,
+    )
+
+    with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
+        ws = manager.create("https://github.com/example/repo.git")
+
+    call_kwargs = mock_docker_client.containers.run.call_args.kwargs
+    assert call_kwargs["network_mode"] == "none"
+    assert ws.security_config.network_mode == "none"
+
+
+def test_container_hardening_non_root_user(
+    tmp_path: Path, mock_docker_client: MagicMock
+) -> None:
+    """Unit test: non-root user execution configured."""
+    manager = WorkspaceManager(
+        docker_client=mock_docker_client,
+        workspace_root=tmp_path,
+    )
+
+    with patch("src.workspace.manager.shallow_clone", return_value="sha123"):
+        ws = manager.create("https://github.com/example/repo.git")
+
+    call_kwargs = mock_docker_client.containers.run.call_args.kwargs
+    assert call_kwargs["user"] == "1000:1000"
+    assert ws.security_config.user == "1000:1000"

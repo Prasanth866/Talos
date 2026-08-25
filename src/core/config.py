@@ -59,6 +59,14 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///talos.db"
 
+    workspace_mem_limit: str = "512m"
+    workspace_cpu_quota: int = 100000
+    workspace_cpu_period: int = 100000
+    workspace_pids_limit: int = 256
+    workspace_read_only: bool = True
+    workspace_network_mode: str = "none"
+    workspace_user: str = "1000:1000"
+
     @model_validator(mode="after")
     def _validate_settings(self) -> Settings:
         if self.environment is Environment.PRODUCTION and self.debug:

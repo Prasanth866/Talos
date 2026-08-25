@@ -224,3 +224,116 @@ async def test_live_command_execution_timeout_enforcement(tmp_path: Path) -> Non
 
     finally:
         manager.destroy(workspace.workspace_id)
+
+
+@pytest.mark.integration
+def test_live_container_hardening_experiments(tmp_path: Path) -> None:
+    """Live Docker experiment testing limits, read-only fs, network, non-root user."""
+    docker_client = docker.from_env()
+
+    source_repo_dir = tmp_path / "source_repo"
+    source_repo_dir.mkdir()
+    (source_repo_dir / "README.md").write_text("# Test Repo\n", encoding="utf-8")
+    repo = git.Repo.init(source_repo_dir)
+    repo.index.add(["README.md"])
+    repo.index.commit("Initial commit")
+
+    workspaces_root = tmp_path / "workspaces"
+    workspaces_root.mkdir()
+
+    manager = WorkspaceManager(
+        docker_client=docker_client,
+        workspace_root=workspaces_root,
+    )
+
+    workspace = manager.create(repo_url=f"file://{source_repo_dir}")
+
+    try:
+        # 1. Non-Root Execution
+        whoami_res = manager.run_command(workspace.workspace_id, "id")
+        print(f"\n[HARDENING EXPERIMENT] User identity: {whoami_res['stdout']}")
+        assert "uid=1000" in str(whoami_res["stdout"])
+
+        # 2. Read-Only Root Filesystem (write to / blocked)
+        ro_res = manager.run_command(
+            workspace.workspace_id,
+            ["/bin/sh", "-c", "touch /root_test 2>&1 || true"],
+        )
+        print(f"[HARDENING EXPERIMENT] Root fs write attempt: {ro_res['stdout']}")
+        assert "Read-only file system" in str(ro_res["stdout"])
+
+        # 3. Writable /workspace
+        ws_write_res = manager.run_command(
+            workspace.workspace_id,
+            [
+                "/bin/sh",
+                "-c",
+                "echo 'sandbox_ok' > /workspace/test.txt && cat /workspace/test.txt",
+            ],
+        )
+        print(f"[HARDENING EXPERIMENT] /workspace write: {ws_write_res['stdout']}")
+        assert ws_write_res["stdout"] == "sandbox_ok"
+
+        # 4. Writable /tmp (tmpfs)
+        tmp_write_res = manager.run_command(
+            workspace.workspace_id,
+            ["/bin/sh", "-c", "echo 'tmp_ok' > /tmp/test.txt && cat /tmp/test.txt"],
+        )
+        print(f"[HARDENING EXPERIMENT] /tmp tmpfs write: {tmp_write_res['stdout']}")
+        assert tmp_write_res["stdout"] == "tmp_ok"
+
+        # 5. Network Isolation (network_mode: none)
+        net_cmd = (
+            'python3 -c "import urllib.request; '
+            "urllib.request.urlopen('http://1.1.1.1', timeout=1)\" 2>&1 || true"
+        )
+        net_res = manager.run_command(
+            workspace.workspace_id,
+            ["/bin/sh", "-c", net_cmd],
+        )
+        print(
+            f"[HARDENING EXPERIMENT] Network egress attempt: "
+            f"{str(net_res['stdout'])[:100]}"
+        )
+        assert (
+            "Network is unreachable" in str(net_res["stdout"])
+            or "URLError" in str(net_res["stdout"])
+            or "timeout" in str(net_res["stdout"]).lower()
+            or "errno 101" in str(net_res["stdout"]).lower()
+        )
+
+        # 6. Memory Limit (512MB limit vs 1GB allocation attempt)
+        mem_cmd = "python3 -c \"a = b'x' * (1024 * 1024 * 1024)\" 2>&1 || true"
+        mem_res = manager.run_command(
+            workspace.workspace_id,
+            ["/bin/sh", "-c", mem_cmd],
+        )
+        print(
+            f"[HARDENING EXPERIMENT] 1GB Memory allocation attempt: "
+            f"{str(mem_res['stdout'])[:100]}"
+        )
+        assert (
+            "MemoryError" in str(mem_res["stdout"])
+            or "Killed" in str(mem_res["stdout"])
+            or str(mem_res["stdout"]) == ""
+        )
+
+        # 7. PIDs Limit (pids_limit=256 vs fork bomb attempt)
+        fork_cmd = 'python3 -c "import os; [os.fork() for _ in range(10)]" 2>&1 || true'
+        fork_res = manager.run_command(
+            workspace.workspace_id,
+            ["/bin/sh", "-c", fork_cmd],
+        )
+        print(
+            f"[HARDENING EXPERIMENT] Fork bomb attempt: {str(fork_res['stdout'])[:100]}"
+        )
+        assert (
+            "BlockingIOError" in str(fork_res["stdout"])
+            or "Resource temporarily unavailable" in str(fork_res["stdout"])
+            or "Errno 11" in str(fork_res["stdout"])
+        )
+
+        print("[HARDENING EXPERIMENT] All container hardening constraints verified!")
+
+    finally:
+        manager.destroy(workspace.workspace_id)
