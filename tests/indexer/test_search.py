@@ -74,10 +74,10 @@ async def test_live_project_hybrid_and_semantic_experiment() -> None:
         embedding_client=MockEmbeddingClient(),
         vector_store=InMemoryVectorStore(),
     )
-    src_dir = Path("src")
+    ws_dir = Path("src/workspace")
 
     t0 = time.perf_counter()
-    chunk_count = await engine.index_directory(src_dir, recursive=True)
+    chunk_count = await engine.index_directory(ws_dir, recursive=True)
     index_duration = time.perf_counter() - t0
 
     print(

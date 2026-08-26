@@ -18,14 +18,25 @@ from src.indexer.models import (
 )
 
 PY_LANGUAGE = Language(tspython.language())
-_SHARED_PARSER = Parser(PY_LANGUAGE)
+_GLOBAL_PARSER: Parser | None = None
+
+
+def get_global_parser() -> Parser:
+    global _GLOBAL_PARSER
+    if _GLOBAL_PARSER is None:
+        _GLOBAL_PARSER = Parser(PY_LANGUAGE)
+    return _GLOBAL_PARSER
 
 
 class PythonASTParser:
     """Extracts structured symbols, imports, and definitions from Python ASTs."""
 
     def __init__(self, parser: Parser | None = None) -> None:
-        self.parser = parser or _SHARED_PARSER
+        self._custom_parser = parser
+
+    @property
+    def parser(self) -> Parser:
+        return self._custom_parser or get_global_parser()
 
     def parse(self, file_path: Path | str, source_code: str | bytes) -> FileStructure:
         """Parses Python source code into a structured FileStructure."""
@@ -35,7 +46,9 @@ class PythonASTParser:
             code_bytes = source_code
 
         file_path_obj = Path(file_path)
-        tree = self.parser.parse(code_bytes)
+        p = self.parser
+        p.reset()
+        tree = p.parse(code_bytes)
 
         has_syntax_errors = tree.root_node.has_error
 
@@ -45,6 +58,7 @@ class PythonASTParser:
         )
 
         self._walk_root_node(tree.root_node, file_structure, code_bytes)
+        p.reset()
         return file_structure
 
     def _walk_root_node(
