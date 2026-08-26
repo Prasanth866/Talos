@@ -66,7 +66,7 @@ class PythonASTParser:
                         parsed = ast.parse(block, filename=filename)
                         if parsed.body:
                             best_node = parsed.body[0]
-                            self._adjust_linenos(best_node, i)
+                            ast.increment_lineno(best_node, i)
                             best_j = j
                     except SyntaxError:
                         continue
@@ -77,14 +77,6 @@ class PythonASTParser:
             i += 1
 
         return ast.Module(body=valid_nodes, type_ignores=[])
-
-    def _adjust_linenos(self, node: ast.AST, offset: int) -> None:
-        """Recursively adjusts line numbers of an AST node parsed from a substring."""
-        for child in ast.walk(node):
-            if hasattr(child, "lineno"):
-                child.lineno += offset
-            if hasattr(child, "end_lineno") and child.end_lineno is not None:
-                child.end_lineno += offset
 
     def _walk_root_body(
         self, body: list[ast.stmt], file_structure: FileStructure

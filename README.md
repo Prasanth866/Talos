@@ -154,7 +154,9 @@ results = await search_engine.search_hybrid(
     "execute command inside docker container and stream lines", top_k=5
 )
 for r in results:
-    print(f"[{r.match_type.value.upper()} | Score: {r.score:.3f}] {r.chunk.symbol_name} ({r.chunk.file_path})")
+    print(
+        f"[{r.match_type.value.upper()} | Score: {r.score:.3f}] {r.chunk.symbol_name} ({r.chunk.file_path})"
+    )
     print(r.chunk.signature)
 ```
 
