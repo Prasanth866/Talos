@@ -1,5 +1,7 @@
+exclude: ^tests/fixtures/
 repos:
   - repo: local
+
     hooks:
       - id: ruff-check
         name: ruff check
@@ -15,13 +17,18 @@ repos:
 
       - id: mypy
         name: mypy
-        entry: uv run mypy
-        language: system
-        types_or: [python, pyi]
-
-      - id: pytest
-        name: pytest
-        entry: uv run pytest --tb=short -q
+        entry: uv run mypy src tests
         language: system
         pass_filenames: false
         always_run: true
+
+
+      - id: pytest
+        name: pytest
+        entry: uv run python tests/run_tests.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+
+

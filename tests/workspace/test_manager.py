@@ -365,7 +365,8 @@ async def test_execute_command_timeout_triggers_timeout_sentinel(
 
     def slow_stream() -> Any:
         yield (b"initial output\n", None)
-        time.sleep(0.5)
+        for _ in range(25):
+            time.sleep(0.01)
         yield (b"should not arrive\n", None)
 
     mock_docker_client.api.exec_start.return_value = slow_stream()

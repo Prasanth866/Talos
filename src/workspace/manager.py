@@ -519,4 +519,7 @@ class WorkspaceManager:
         finally:
             stop_event.set()
             with contextlib.suppress(Exception):
+                reader.join(timeout=0.25)
+
+            with contextlib.suppress(Exception):
                 container.exec_run(["/bin/sh", "-c", f"rm -f {pid_file}"])

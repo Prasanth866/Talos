@@ -11,6 +11,7 @@ import structlog
 
 from src.agent.models import ToolCall, ToolResult
 from src.agent.prompts import format_tool_doc
+from src.indexer import CodeIndexer
 from src.tools.exceptions import ToolError
 from src.tools.filesystem import FileSystemTool
 from src.tools.shell import ShellTool
@@ -294,6 +295,101 @@ def create_default_dispatcher(sandbox_dir: Path) -> ToolDispatcher:
                 }
             },
             "required": ["command"],
+        },
+    )
+
+    indexer = CodeIndexer()
+
+    def _get_symbol_definition(symbol_name: str, file_path: str | None = None) -> str:
+        target_path = (sandbox_dir / file_path).resolve() if file_path else None
+        if target_path and not str(target_path).startswith(str(sandbox_dir)):
+            return f"Error: Path '{file_path}' is outside sandbox root."
+
+        symbols = indexer.get_symbol_definition(symbol_name, file_path=target_path)
+        if not symbols:
+            indexer.index_directory(sandbox_dir)
+            symbols = indexer.get_symbol_definition(symbol_name, file_path=target_path)
+
+        if not symbols:
+            return f"Symbol '{symbol_name}' not found."
+
+        output_blocks = []
+        for s in symbols:
+            loc = (
+                s.file_path.relative_to(sandbox_dir)
+                if sandbox_dir in s.file_path.parents or s.file_path == sandbox_dir
+                else s.file_path
+            )
+            block = (
+                f"Symbol: {s.name} ({s.kind.value}) in {loc}:"
+                f"{s.line_span.start_line}-{s.line_span.end_line}\n"
+                f"Signature: {s.signature}"
+            )
+            if s.docstring:
+                block += f"\nDocstring: {s.docstring}"
+            output_blocks.append(block)
+        return "\n\n".join(output_blocks)
+
+    dispatcher.register_tool(
+        name="get_symbol_definition",
+        description="Extracts the AST definition and signature of a Python symbol.",
+        handler=_get_symbol_definition,
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "symbol_name": {
+                    "type": "string",
+                    "description": "Symbol name to lookup (e.g. 'WorkspaceManager').",
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Optional relative path to Python file.",
+                },
+            },
+            "required": ["symbol_name"],
+        },
+    )
+
+    def _list_file_structure(path: str) -> str:
+        target = (sandbox_dir / path).resolve()
+        if not str(target).startswith(str(sandbox_dir)):
+            return f"Error: Path '{path}' is outside sandbox root."
+        if not target.exists() or not target.is_file():
+            return f"Error: File '{path}' does not exist or is not a file."
+
+        structure = indexer.list_file_structure(target)
+        lines = [f"File: {path}"]
+        if structure.imports:
+            lines.append(f"Imports ({len(structure.imports)}):")
+            for imp in structure.imports:
+                lines.append(f"  - {imp.statement} (L{imp.line_span.start_line})")
+        if structure.classes:
+            lines.append(f"Classes ({len(structure.classes)}):")
+            for cls in structure.classes:
+                span_str = f"L{cls.line_span.start_line}-L{cls.line_span.end_line}"
+                lines.append(f"  - {cls.signature} ({span_str})")
+                for m in cls.methods:
+                    lines.append(f"      * {m.signature} (L{m.line_span.start_line})")
+        if structure.functions:
+            lines.append(f"Functions ({len(structure.functions)}):")
+            for fn in structure.functions:
+                span_str = f"L{fn.line_span.start_line}-L{fn.line_span.end_line}"
+                lines.append(f"  - {fn.signature} ({span_str})")
+        return "\n".join(lines)
+
+    dispatcher.register_tool(
+        name="list_file_structure",
+        description="Returns structural overview of a Python file.",
+        handler=_list_file_structure,
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative path to the Python source file.",
+                }
+            },
+            "required": ["path"],
         },
     )
 

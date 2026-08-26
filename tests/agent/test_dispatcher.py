@@ -72,28 +72,64 @@ async def test_default_dispatcher_file_and_shell_tools(tmp_path: Path) -> None:
         "write_file",
         "list_dir",
         "run_shell",
+        "get_symbol_definition",
+        "list_file_structure",
     }
 
     # 1. Write file
     write_call = ToolCall(
-        tool_name="write_file", arguments={"path": "test.txt", "content": "hello talos"}
+        tool_name="write_file",
+        arguments={"path": "test.txt", "content": "hello talos"},
     )
     write_res = await dispatcher.execute_tool(write_call)
     assert write_res.success is True
 
-    # 2. List dir
+    # 2. Write a Python file
+    py_code = """
+def add(a: int, b: int = 1) -> int:
+    \"\"\"Adds two numbers.\"\"\"
+    return a + b
+"""
+    await dispatcher.execute_tool(
+        ToolCall(
+            tool_name="write_file",
+            arguments={"path": "math_mod.py", "content": py_code},
+        )
+    )
+
+    # 3. get_symbol_definition
+    sym_call = ToolCall(
+        tool_name="get_symbol_definition",
+        arguments={"symbol_name": "add"},
+    )
+    sym_res = await dispatcher.execute_tool(sym_call)
+    assert sym_res.success is True
+    assert "def add(a: int, b: int = 1) -> int" in sym_res.output
+    assert "Adds two numbers." in sym_res.output
+
+    # 4. list_file_structure
+    struct_call = ToolCall(
+        tool_name="list_file_structure",
+        arguments={"path": "math_mod.py"},
+    )
+    struct_res = await dispatcher.execute_tool(struct_call)
+    assert struct_res.success is True
+    assert "Functions (1):" in struct_res.output
+    assert "def add(a: int, b: int = 1) -> int" in struct_res.output
+
+    # 5. List dir
     list_call = ToolCall(tool_name="list_dir", arguments={"path": "."})
     list_res = await dispatcher.execute_tool(list_call)
     assert list_res.success is True
     assert "test.txt" in list_res.output
 
-    # 3. Read file
+    # 6. Read file
     read_call = ToolCall(tool_name="read_file", arguments={"path": "test.txt"})
     read_res = await dispatcher.execute_tool(read_call)
     assert read_res.success is True
     assert read_res.output == "hello talos"
 
-    # 4. Run shell
+    # 7. Run shell
     shell_call = ToolCall(
         tool_name="run_shell", arguments={"command": "echo 'running shell'"}
     )
@@ -101,12 +137,12 @@ async def test_default_dispatcher_file_and_shell_tools(tmp_path: Path) -> None:
     assert shell_res.success is True
     assert "running shell" in shell_res.output
 
-    # 5. List dir non-existent
+    # 8. List dir non-existent
     bad_list = ToolCall(tool_name="list_dir", arguments={"path": "non_existent_folder"})
     bad_list_res = await dispatcher.execute_tool(bad_list)
     assert "does not exist" in bad_list_res.output
 
-    # 6. List dir on a file
+    # 9. List dir on a file
     file_list = ToolCall(tool_name="list_dir", arguments={"path": "test.txt"})
     file_list_res = await dispatcher.execute_tool(file_list)
     assert "is not a directory" in file_list_res.output
