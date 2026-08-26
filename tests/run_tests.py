@@ -13,6 +13,9 @@ TEST_SUITES = [
     ["tests/workspace/test_manager.py", "-q"],
     ["tests/indexer/test_parser.py", "-q"],
     ["tests/indexer/test_indexer.py", "-q"],
+    ["tests/indexer/test_chunker.py", "-q"],
+    ["tests/indexer/test_embeddings.py", "-q"],
+    ["tests/indexer/test_search.py", "-q"],
 ]
 
 

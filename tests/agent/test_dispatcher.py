@@ -74,6 +74,8 @@ async def test_default_dispatcher_file_and_shell_tools(tmp_path: Path) -> None:
         "run_shell",
         "get_symbol_definition",
         "list_file_structure",
+        "semantic_search",
+        "hybrid_search",
     }
 
     # 1. Write file
@@ -116,6 +118,25 @@ def add(a: int, b: int = 1) -> int:
     assert struct_res.success is True
     assert "Functions (1):" in struct_res.output
     assert "def add(a: int, b: int = 1) -> int" in struct_res.output
+
+    # 5. semantic_search
+    sem_call = ToolCall(
+        tool_name="semantic_search",
+        arguments={"query": "function that adds numbers"},
+    )
+    sem_res = await dispatcher.execute_tool(sem_call)
+    assert sem_res.success is True
+    assert "add" in sem_res.output
+
+    # 6. hybrid_search
+    hyb_call = ToolCall(
+        tool_name="hybrid_search",
+        arguments={"query": "add"},
+    )
+    hyb_res = await dispatcher.execute_tool(hyb_call)
+    assert hyb_res.success is True
+    assert "EXACT" in hyb_res.output or "HYBRID" in hyb_res.output
+    assert "add" in hyb_res.output
 
     # 5. List dir
     list_call = ToolCall(tool_name="list_dir", arguments={"path": "."})

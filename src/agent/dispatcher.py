@@ -11,7 +11,7 @@ import structlog
 
 from src.agent.models import ToolCall, ToolResult
 from src.agent.prompts import format_tool_doc
-from src.indexer import CodeIndexer
+from src.indexer import CodeIndexer, HybridSearchEngine
 from src.tools.exceptions import ToolError
 from src.tools.filesystem import FileSystemTool
 from src.tools.shell import ShellTool
@@ -390,6 +390,100 @@ def create_default_dispatcher(sandbox_dir: Path) -> ToolDispatcher:
                 }
             },
             "required": ["path"],
+        },
+    )
+
+    search_engine = HybridSearchEngine(indexer=indexer)
+
+    async def _semantic_search(query: str, top_k: int = 5) -> str:
+        await search_engine.index_directory(sandbox_dir)
+        results = await search_engine.search_semantic(query, top_k=top_k)
+        if not results:
+            return f"No semantic matches found for '{query}'."
+        blocks = []
+        for r in results:
+            loc = (
+                r.chunk.file_path.relative_to(sandbox_dir)
+                if (
+                    sandbox_dir in r.chunk.file_path.parents
+                    or r.chunk.file_path == sandbox_dir
+                )
+                else r.chunk.file_path
+            )
+            span_str = f"{r.chunk.line_span.start_line}-{r.chunk.line_span.end_line}"
+            block = (
+                f"[{r.match_type.value.upper()} | Score: {r.score:.3f}] "
+                f"{r.chunk.symbol_name} ({r.chunk.kind.value}) in {loc}:{span_str}\n"
+                f"Signature: {r.chunk.signature}"
+            )
+            if r.chunk.docstring:
+                block += f"\nDocstring: {r.chunk.docstring}"
+            blocks.append(block)
+        return "\n\n".join(blocks)
+
+    dispatcher.register_tool(
+        name="semantic_search",
+        description="Performs semantic vector search over Python code chunks.",
+        handler=_semantic_search,
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language query describing desired code.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Max results to return (default: 5).",
+                },
+            },
+            "required": ["query"],
+        },
+    )
+
+    async def _hybrid_search(query: str, top_k: int = 5) -> str:
+        await search_engine.index_directory(sandbox_dir)
+        results = await search_engine.search_hybrid(query, top_k=top_k)
+        if not results:
+            return f"No matches found for '{query}'."
+        blocks = []
+        for r in results:
+            loc = (
+                r.chunk.file_path.relative_to(sandbox_dir)
+                if (
+                    sandbox_dir in r.chunk.file_path.parents
+                    or r.chunk.file_path == sandbox_dir
+                )
+                else r.chunk.file_path
+            )
+            span_str = f"{r.chunk.line_span.start_line}-{r.chunk.line_span.end_line}"
+            block = (
+                f"[{r.match_type.value.upper()} | Score: {r.score:.3f}] "
+                f"{r.chunk.symbol_name} ({r.chunk.kind.value}) in {loc}:{span_str}\n"
+                f"Signature: {r.chunk.signature}"
+            )
+            if r.chunk.docstring:
+                block += f"\nDocstring: {r.chunk.docstring}"
+            blocks.append(block)
+        return "\n\n".join(blocks)
+
+    dispatcher.register_tool(
+        name="hybrid_search",
+        description="Performs hybrid exact symbol & semantic code search.",
+        handler=_hybrid_search,
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Symbol name or natural language description.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Max results to return (default: 5).",
+                },
+            },
+            "required": ["query"],
         },
     )
 
