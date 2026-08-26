@@ -18,7 +18,9 @@ dependencies = [
     "tree-sitter>=0.26.0",
     "tree-sitter-python>=0.25.0",
     "pgvector>=0.3.6",
+    "asyncpg>=0.30.0",
 ]
+
 
 
 [dependency-groups]
