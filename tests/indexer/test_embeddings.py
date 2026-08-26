@@ -51,11 +51,48 @@ async def test_embedding_cost_tracking_and_logging() -> None:
         ),
     ]
     embeddings = await client.embed_texts(texts)
-
     assert len(embeddings) == 2
 
     summary = tracker.log_summary(context="test_run")
+
     assert summary["total_chunks"] == 2
     assert summary["total_tokens"] > 0
     assert summary["total_cost_usd"] >= 0.0
     assert summary["duration_seconds"] >= 0.0
+
+
+def test_gemini_embedding_client_properties() -> None:
+    """Unit test: GeminiEmbeddingClient properties and configuration."""
+    from src.indexer.embeddings import GeminiEmbeddingClient
+
+    client = GeminiEmbeddingClient(
+        api_key="test-api-key",
+        model="text-embedding-004",
+        dimension=768,
+    )
+    assert client.dimension == 768
+    assert client.model == "text-embedding-004"
+    assert client.api_key == "test-api-key"
+
+
+def test_create_default_embedding_client_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unit test: create_default_embedding_client picks Gemini when key is present."""
+    from src.indexer.embeddings import (
+        GeminiEmbeddingClient,
+        MockEmbeddingClient,
+        create_default_embedding_client,
+    )
+
+    # 1. No key -> returns MockEmbeddingClient
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    client_mock = create_default_embedding_client()
+    assert isinstance(client_mock, MockEmbeddingClient)
+
+    # 2. Key provided -> returns GeminiEmbeddingClient
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    client_gemini = create_default_embedding_client()
+    assert isinstance(client_gemini, GeminiEmbeddingClient)
+    assert client_gemini.api_key == "test-gemini-key"

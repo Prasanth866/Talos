@@ -86,7 +86,6 @@ class CodeIndexer:
                 return []
             if name in structure.symbols:
                 return [structure.symbols[name]]
-            # Method lookup by unqualified name within the file
             matches = [
                 s
                 for s in structure.symbols.values()
@@ -94,11 +93,9 @@ class CodeIndexer:
             ]
             return matches
 
-        # Global lookup: exact match first
         if name in self._symbols_by_name:
             return list(self._symbols_by_name[name])
 
-        # Substring / method name match across all files
         matches = []
         for sym_name, symbols in self._symbols_by_name.items():
             if sym_name.endswith(f".{name}") or sym_name.lower() == name.lower():

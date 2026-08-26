@@ -4,10 +4,13 @@ from src.indexer.chunker import ASTChunker, CodeChunk
 from src.indexer.embeddings import (
     DEFAULT_EMBEDDING_COST_PER_MILLION_TOKENS,
     DEFAULT_EMBEDDING_DIMENSION,
+    DEFAULT_GEMINI_MODEL,
     EmbeddingClient,
     EmbeddingCostTracker,
+    GeminiEmbeddingClient,
     MockEmbeddingClient,
     OpenAIEmbeddingClient,
+    create_default_embedding_client,
 )
 from src.indexer.indexer import CodeIndexer
 from src.indexer.models import (
@@ -31,6 +34,7 @@ from src.indexer.vector_store import (
 __all__ = [
     "DEFAULT_EMBEDDING_COST_PER_MILLION_TOKENS",
     "DEFAULT_EMBEDDING_DIMENSION",
+    "DEFAULT_GEMINI_MODEL",
     "ASTChunker",
     "ArgumentDefinition",
     "ClassDefinition",
@@ -40,6 +44,7 @@ __all__ = [
     "EmbeddingCostTracker",
     "FileStructure",
     "FunctionDefinition",
+    "GeminiEmbeddingClient",
     "HybridSearchEngine",
     "ImportDefinition",
     "InMemoryVectorStore",
@@ -53,4 +58,5 @@ __all__ = [
     "Symbol",
     "SymbolKind",
     "VectorStore",
+    "create_default_embedding_client",
 ]

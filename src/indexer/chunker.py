@@ -75,12 +75,10 @@ class ASTChunker:
         lines = source_code.splitlines()
         chunks: list[CodeChunk] = []
 
-        # 1. Chunk top-level functions
         for fn in structure.functions:
             chunk = self._create_function_chunk(structure.file_path, fn, lines)
             chunks.append(chunk)
 
-        # 2. Chunk classes and their member methods
         for cls in structure.classes:
             class_chunk = self._create_class_chunk(structure.file_path, cls, lines)
             chunks.append(class_chunk)
@@ -91,7 +89,6 @@ class ASTChunker:
                 )
                 chunks.append(method_chunk)
 
-        # 3. Chunk module imports and header if present
         if structure.imports:
             module_chunk = self._create_module_imports_chunk(
                 structure.file_path, structure, lines

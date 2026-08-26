@@ -52,7 +52,12 @@ class Settings(BaseSettings):
     llm_retry_backoff_factor: float = 2.0
     llm_max_steps: int = 50
 
+    gemini_api_key: SecretStr = SecretStr("")
+    embedding_model: str = "text-embedding-004"
+    embedding_dimension: int = 768
+
     worker_concurrency: int = 4
+
     task_queue_max_size: int = 100
     shutdown_drain_timeout_seconds: float = 3.0
     max_retained_task_events: int = 1000

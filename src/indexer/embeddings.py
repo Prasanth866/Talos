@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import re
 import time
 from typing import Any, Protocol, runtime_checkable
@@ -17,9 +18,9 @@ from tenacity import (
 
 logger = structlog.get_logger(__name__)
 
-# Standard OpenAI text-embedding-3-small pricing: $0.02 per 1,000,000 tokens
 DEFAULT_EMBEDDING_COST_PER_MILLION_TOKENS = 0.02
-DEFAULT_EMBEDDING_DIMENSION = 1536
+DEFAULT_EMBEDDING_DIMENSION = 768
+DEFAULT_GEMINI_MODEL = "text-embedding-004"
 
 
 @runtime_checkable
@@ -75,6 +76,88 @@ class EmbeddingCostTracker:
         return summary
 
 
+class GeminiEmbeddingClient:
+    """Google Gemini embedding client using text-embedding-004 via REST API."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_GEMINI_MODEL,
+        dimension: int = DEFAULT_EMBEDDING_DIMENSION,
+        base_url: str = "https://generativelanguage.googleapis.com/v1beta",
+        batch_size: int = 50,
+        cost_tracker: EmbeddingCostTracker | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model.removeprefix("models/")
+        self._dimension = dimension
+        self.base_url = base_url.rstrip("/")
+        self.batch_size = batch_size
+        self.cost_tracker = cost_tracker or EmbeddingCostTracker()
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    def _is_transient_error(self, exc: BaseException) -> bool:
+        if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
+            return True
+        if isinstance(exc, httpx.HTTPStatusError):
+            return exc.response.status_code in (429, 500, 502, 503, 504)
+        return False
+
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+
+        all_embeddings: list[list[float]] = []
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i : i + self.batch_size]
+            batch_embeddings = await self._embed_batch(batch)
+            all_embeddings.extend(batch_embeddings)
+
+        return all_embeddings
+
+    async def embed_query(self, text: str) -> list[float]:
+        results = await self.embed_texts([text])
+        return results[0]
+
+    async def _embed_batch(self, batch: list[str]) -> list[list[float]]:
+        @retry(
+            retry=retry_if_exception(self._is_transient_error),
+            wait=wait_random_exponential(min=1.0, max=10.0),
+            stop=stop_after_attempt(4),
+            reraise=True,
+        )
+        async def _call() -> list[list[float]]:
+            url = f"{self.base_url}/models/{self.model}:batchEmbedContents"
+            headers = {
+                "x-goog-api-key": self.api_key,
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "requests": [
+                    {
+                        "model": f"models/{self.model}",
+                        "content": {"parts": [{"text": text}]},
+                    }
+                    for text in batch
+                ]
+            }
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+
+                raw_embeddings = data.get("embeddings", [])
+                tokens_used = sum(max(1, len(t) // 4) for t in batch)
+                self.cost_tracker.record(tokens_used, chunk_count=len(batch))
+
+                return [item["values"] for item in raw_embeddings]
+
+        return await _call()
+
+
 class OpenAIEmbeddingClient:
     """Async OpenAI-compatible embedding client with batching and backoff."""
 
@@ -83,7 +166,7 @@ class OpenAIEmbeddingClient:
         api_key: str,
         base_url: str = "https://api.openai.com/v1",
         model: str = "text-embedding-3-small",
-        dimension: int = DEFAULT_EMBEDDING_DIMENSION,
+        dimension: int = 1536,
         batch_size: int = 64,
         cost_tracker: EmbeddingCostTracker | None = None,
     ) -> None:
@@ -187,7 +270,7 @@ class MockEmbeddingClient:
         return results[0]
 
     def _generate_deterministic_vector(self, text: str) -> list[float]:
-        """Produces a normalized 1536-dim vector reflecting token semantics."""
+        """Produces a normalized vector reflecting token semantics."""
         vector = [0.0] * self._dimension
         tokens = re.findall(r"\w+", text.lower())
 
@@ -195,17 +278,35 @@ class MockEmbeddingClient:
             vector[0] = 1.0
             return vector
 
-        # Project tokens across vector dimensions using SHA256 hashes
         for token in tokens:
             h = hashlib.sha256(token.encode("utf-8")).digest()
             for idx in range(8):
                 dim = ((h[idx * 2] << 8) | h[idx * 2 + 1]) % self._dimension
                 vector[dim] += 1.0
 
-        # Normalize to unit length (L2 norm)
         squared_sum = sum(v * v for v in vector)
         norm = math.sqrt(squared_sum)
         if norm > 0:
             return [v / norm for v in vector]
         vector[0] = 1.0
         return vector
+
+
+def create_default_embedding_client(
+    api_key: str | None = None,
+    model: str = DEFAULT_GEMINI_MODEL,
+    dimension: int = DEFAULT_EMBEDDING_DIMENSION,
+    cost_tracker: EmbeddingCostTracker | None = None,
+) -> EmbeddingClient:
+    """Factory creating GeminiEmbeddingClient or MockEmbeddingClient fallback."""
+    key = (
+        api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    )
+    if key and key.strip():
+        return GeminiEmbeddingClient(
+            api_key=key.strip(),
+            model=model,
+            dimension=dimension,
+            cost_tracker=cost_tracker,
+        )
+    return MockEmbeddingClient(dimension=dimension, cost_tracker=cost_tracker)

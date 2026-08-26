@@ -58,7 +58,6 @@ class InMemoryVectorStore:
             v_norm = math.sqrt(sum(v * v for v in vector))
             similarity = dot_product / (q_norm * v_norm) if v_norm > 0 else 0.0
 
-            # Clamp similarity to [0.0, 1.0] range
             similarity = max(0.0, min(1.0, similarity))
             scored_results.append((chunk, similarity))
 
@@ -85,12 +84,10 @@ class PGVectorStore:
         self.fallback = in_memory_fallback or InMemoryVectorStore()
 
     async def add_chunks(self, chunks: list[CodeChunk]) -> None:
-        # Always maintain in-memory fallback for zero-latency lookups
         await self.fallback.add_chunks(chunks)
 
         if self.session_factory is not None:
             try:
-                # Optional: insert to pgvector table if PostgreSQL session is active
                 pass
             except Exception as exc:
                 logger.warning("pgvector_insert_skipped_using_fallback", error=str(exc))

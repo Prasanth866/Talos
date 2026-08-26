@@ -11,7 +11,11 @@ import structlog
 
 from src.agent.models import ToolCall, ToolResult
 from src.agent.prompts import format_tool_doc
-from src.indexer import CodeIndexer, HybridSearchEngine
+from src.indexer import (
+    CodeIndexer,
+    HybridSearchEngine,
+    create_default_embedding_client,
+)
 from src.tools.exceptions import ToolError
 from src.tools.filesystem import FileSystemTool
 from src.tools.shell import ShellTool
@@ -393,7 +397,10 @@ def create_default_dispatcher(sandbox_dir: Path) -> ToolDispatcher:
         },
     )
 
-    search_engine = HybridSearchEngine(indexer=indexer)
+    search_engine = HybridSearchEngine(
+        indexer=indexer,
+        embedding_client=create_default_embedding_client(),
+    )
 
     async def _semantic_search(query: str, top_k: int = 5) -> str:
         await search_engine.index_directory(sandbox_dir)

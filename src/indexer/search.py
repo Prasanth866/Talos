@@ -119,7 +119,6 @@ class HybridSearchEngine:
             sig_lower = chunk.signature.lower()
             unqualified = sym_lower.split(".")[-1]
 
-            # 1. Exact match on full or unqualified symbol name
             if q in (sym_lower, unqualified):
                 exact_results.append(
                     SearchResult(
@@ -129,7 +128,6 @@ class HybridSearchEngine:
                         explanation=f"Exact symbol name match '{chunk.symbol_name}'",
                     )
                 )
-            # 2. Exact match in signature
             elif q in sig_lower:
                 exact_results.append(
                     SearchResult(
@@ -139,7 +137,6 @@ class HybridSearchEngine:
                         explanation=f"Exact signature match in '{chunk.signature}'",
                     )
                 )
-            # 3. Substring match in symbol name
             elif q in sym_lower:
                 exact_results.append(
                     SearchResult(
@@ -190,9 +187,7 @@ class HybridSearchEngine:
 
         merged_by_id: dict[str, SearchResult] = {}
 
-        # 1. Process exact matches first
         for res in exact_matches:
-            # Full symbol name match gets highest priority score
             boosted_score = res.score
             if res.score == 1.0:
                 boosted_score = 1.0 * exact_boost
@@ -203,12 +198,10 @@ class HybridSearchEngine:
                 explanation=res.explanation,
             )
 
-        # 2. Merge semantic matches
         for res in semantic_matches:
             cid = res.chunk.chunk_id
             if cid in merged_by_id:
                 existing = merged_by_id[cid]
-                # Combined exact and semantic match without degrading exact score
                 combined_score = max(
                     existing.score,
                     existing.score * 0.7 + res.score * 0.3,
