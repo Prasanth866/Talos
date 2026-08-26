@@ -53,8 +53,8 @@ class Settings(BaseSettings):
     llm_max_steps: int = 50
 
     gemini_api_key: SecretStr = SecretStr("")
-    embedding_model: str = "text-embedding-004"
-    embedding_dimension: int = 768
+    embedding_model: str = "gemini-embedding-001"
+    embedding_dimension: int = 3072
 
     worker_concurrency: int = 4
 

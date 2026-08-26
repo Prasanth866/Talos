@@ -19,8 +19,8 @@ from tenacity import (
 logger = structlog.get_logger(__name__)
 
 DEFAULT_EMBEDDING_COST_PER_MILLION_TOKENS = 0.02
-DEFAULT_EMBEDDING_DIMENSION = 768
-DEFAULT_GEMINI_MODEL = "text-embedding-004"
+DEFAULT_EMBEDDING_DIMENSION = 3072
+DEFAULT_GEMINI_MODEL = "gemini-embedding-001"
 
 
 @runtime_checkable
