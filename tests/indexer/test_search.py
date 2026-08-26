@@ -66,55 +66,50 @@ async def test_hybrid_search_prefers_exact_match_over_semantic() -> None:
     assert any("multiply" in s for s in symbols)
 
 
-def test_live_project_hybrid_and_semantic_experiment() -> None:
+@pytest.mark.asyncio
+async def test_live_project_hybrid_and_semantic_experiment() -> None:
     """Experiment: Index codebase, compare hybrid vs semantic search."""
+    engine = HybridSearchEngine(
+        chunker=ASTChunker(),
+        embedding_client=MockEmbeddingClient(),
+        vector_store=InMemoryVectorStore(),
+    )
+    src_dir = Path("src")
 
-    async def _run() -> None:
-        engine = HybridSearchEngine(
-            chunker=ASTChunker(),
-            embedding_client=MockEmbeddingClient(),
-            vector_store=InMemoryVectorStore(),
-        )
-        src_dir = Path("src")
+    t0 = time.perf_counter()
+    chunk_count = await engine.index_directory(src_dir, recursive=True)
+    index_duration = time.perf_counter() - t0
 
-        t0 = time.perf_counter()
-        chunk_count = await engine.index_directory(src_dir, recursive=True)
-        index_duration = time.perf_counter() - t0
+    print(
+        f"\n[SEMANTIC EXPERIMENT] Indexed {chunk_count} code chunks in "
+        f"{index_duration:.4f}s"
+    )
 
-        print(
-            f"\n[SEMANTIC EXPERIMENT] Indexed {chunk_count} code chunks in "
-            f"{index_duration:.4f}s"
-        )
+    # 1. Query: exact symbol
+    t_start = time.perf_counter()
+    exact_res = await engine.search_hybrid("WorkspaceManager", top_k=5)
+    exact_latency_ms = (time.perf_counter() - t_start) * 1000.0
 
-        # 1. Query: exact symbol
-        t_start = time.perf_counter()
-        exact_res = await engine.search_hybrid("WorkspaceManager", top_k=5)
-        exact_latency_ms = (time.perf_counter() - t_start) * 1000.0
+    assert len(exact_res) > 0
+    assert exact_res[0].chunk.symbol_name == "WorkspaceManager"
+    print(
+        f"[SEMANTIC EXPERIMENT] Exact Query 'WorkspaceManager' took "
+        f"{exact_latency_ms:.2f}ms -> Top: {exact_res[0].chunk.symbol_name}"
+    )
 
-        assert len(exact_res) > 0
-        assert exact_res[0].chunk.symbol_name == "WorkspaceManager"
-        print(
-            f"[SEMANTIC EXPERIMENT] Exact Query 'WorkspaceManager' took "
-            f"{exact_latency_ms:.2f}ms -> Top: {exact_res[0].chunk.symbol_name}"
-        )
+    # 2. Query: natural language semantic description
+    t_start = time.perf_counter()
+    sem_res = await engine.search_hybrid(
+        "asynchronously execute command inside docker container and stream lines",
+        top_k=5,
+    )
+    sem_latency_ms = (time.perf_counter() - t_start) * 1000.0
 
-        # 2. Query: natural language semantic description
-        t_start = time.perf_counter()
-        sem_res = await engine.search_hybrid(
-            "asynchronously execute command inside docker container and stream lines",
-            top_k=5,
-        )
-        sem_latency_ms = (time.perf_counter() - t_start) * 1000.0
-
-        assert len(sem_res) > 0
-        top = sem_res[0]
-        print(
-            f"[SEMANTIC EXPERIMENT] Semantic Query took {sem_latency_ms:.2f}ms "
-            f"-> Top: {top.chunk.symbol_name} ({top.match_type.value}, "
-            f"score: {top.score:.3f})"
-        )
-        assert any("execute_command" in r.chunk.symbol_name for r in sem_res)
-
-    import asyncio
-
-    asyncio.run(_run())
+    assert len(sem_res) > 0
+    top = sem_res[0]
+    print(
+        f"[SEMANTIC EXPERIMENT] Semantic Query took {sem_latency_ms:.2f}ms "
+        f"-> Top: {top.chunk.symbol_name} ({top.match_type.value}, "
+        f"score: {top.score:.3f})"
+    )
+    assert any("execute_command" in r.chunk.symbol_name for r in sem_res)
