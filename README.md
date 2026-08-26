@@ -7,7 +7,9 @@ Autonomous software engineering agent framework featuring a tool-use reasoning l
 ## Key Features
 
 - **Autonomous Reasoning Loop**: Step-by-step ReAct-style agent execution loop (`ReasoningLoop`) with dynamic tool dispatching, compact observation limits, adaptive rate-limit (429) backoff, and token/cost tracking.
+- **`tree-sitter` AST Code Indexing**: Incremental, fault-tolerant Python AST indexer (`PythonASTParser`, `CodeIndexer`) extracting function/class signatures, docstrings, typed arguments, inheritance hierarchies, and imports with sub-millisecond per-file latency, exposed directly to agent reasoning via `get_symbol_definition` and `list_file_structure` tools.
 - **Docker Workspace Hardening & Isolation**: Task-isolated container environments (`WorkspaceManager`) with shallow Git repository cloning (`--depth 1`), custom volume mounting, memory caps (`512MB`), CPU quotas, process limits (`pids_limit=256`), read-only root filesystems, air-gapped network isolation (`network_mode="none"`), and non-root execution (`user="1000:1000"`).
+
 - **Async Streaming Command Execution**: Async generator command runner (`execute_command`) yielding line streams in real-time, enforcing a 1MB output cap (`[TRUNCATED]` sentinel), timeout enforcement (`[TIMEOUT]` sentinel), and background process tree termination.
 - **Adversarial Security Test Suite**: Comprehensive security test suite (`tests/workspace/test_security.py`) actively attempting network escape, filesystem escape, fork bombs, memory exhaustion, and path traversal to prove container isolation.
 - **Async Worker Queue & Pool**: Structured concurrency managed via `asyncio.TaskGroup` over a bounded `asyncio.Queue` with configurable worker concurrency.
@@ -146,6 +148,50 @@ All Docker and Git operations are strictly wrapped so no low-level raw exception
 
 ---
 
+## `tree-sitter` AST Code Indexing
+
+Talos includes a structural code indexer built on `tree-sitter` and `tree-sitter-python`. It parses source code into resilient concrete syntax trees, extracting detailed symbol definitions, signatures, line spans, docstrings, class inheritance hierarchies, and imports.
+
+```python
+from pathlib import Path
+from src.indexer import CodeIndexer, SymbolKind
+
+# Initialize in-memory indexer
+indexer = CodeIndexer()
+
+# 1. Index an entire codebase recursively
+indexed_files = indexer.index_directory(Path("src"), recursive=True)
+print(f"Indexed {indexed_files} Python source files")
+
+# 2. Lookup symbol definitions across the repository or in a specific file
+symbols = indexer.get_symbol_definition("WorkspaceManager")
+for sym in symbols:
+    print(f"Found: {sym.signature} (L{sym.line_span.start_line}-L{sym.line_span.end_line})")
+    print(f"Docstring: {sym.docstring}")
+
+# 3. Retrieve high-level file structure (imports, classes, methods, functions)
+structure = indexer.list_file_structure("src/workspace/manager.py")
+print(f"Imports: {len(structure.imports)}")
+print(f"Classes: {[c.name for c in structure.classes]}")
+print(f"Functions: {[f.name for f in structure.functions]}")
+print(f"Syntax Errors Detected: {structure.has_syntax_errors}")
+
+# 4. Search symbols by substring or fuzzy match
+matches = indexer.search_symbols("execute_command")
+for m in matches:
+    print(f"Match: {m.name} -> {m.signature}")
+```
+
+### Agent Tool Dispatcher Integration
+The reasoning loop has built-in access to the indexer via agent tools:
+- `get_symbol_definition(symbol_name, file_path=None)`: Retrieves AST signature, line spans, and docstring of any class, method, or function.
+- `list_file_structure(path)`: Returns a high-level architectural outline of any Python file (imports, classes, member methods, standalone functions).
+
+### Resilient Error Recovery
+Unlike Python's standard `ast.parse()` which raises an unrecoverable `SyntaxError` on partial code edits, `tree-sitter` creates localized `ERROR` nodes and continues indexing all valid sibling definitions before and after the syntax error.
+
+---
+
 ## Web UI Overview
 
 The web client is built with zero runtime or build dependencies (pure HTML5, CSS3, and modern JavaScript) and features:
@@ -210,17 +256,17 @@ curl -X DELETE http://localhost:8000/tasks
 ## Running Tests & Quality Checks
 
 ```bash
-# Run pytest across entire repository
-uv run pytest --tb=short -q
+# Run all unit tests across the codebase
+uv run python tests/run_tests.py
+
+# Run tree-sitter AST parser & indexer unit tests
+uv run pytest tests/indexer/test_parser.py tests/indexer/test_indexer.py -v
 
 # Run adversarial security test suite (network, fs, fork, OOM, traversal)
 uv run pytest tests/workspace/test_security.py -v -s
 
 # Run live Docker workspace experiments
 uv run pytest tests/workspace/test_experiment.py -v -s
-
-# Run pytest with full coverage report
-uv run pytest --cov=src --cov-report=term-missing
 
 # Run strict type checking
 uv run mypy src tests migrations
@@ -248,7 +294,7 @@ Talos/
 ├── src/
 │   ├── main.py                   # FastAPI app, database lifespan & crash recovery
 │   ├── agent/
-│   │   ├── dispatcher.py         # Tool registry and execution dispatcher
+│   │   ├── dispatcher.py         # Tool registry and execution dispatcher (with AST tools)
 │   │   ├── llm_client.py         # HTTP (OpenAI-compatible) and Mock LLM clients
 │   │   ├── loop.py               # ReAct reasoning loop coordinator
 │   │   ├── models.py             # Trajectory, Step, TokenUsage & Message models
@@ -272,6 +318,10 @@ Talos/
 │   ├── db/
 │   │   ├── models.py             # Task SQLAlchemy ORM model & TaskStatus enum
 │   │   └── repository.py         # Pure-function asynchronous data access layer
+│   ├── indexer/
+│   │   ├── indexer.py            # CodeIndexer multi-file index & symbol query API
+│   │   ├── models.py             # Symbol, FunctionDefinition, ClassDefinition dataclasses
+│   │   └── parser.py             # PythonASTParser using tree-sitter Python grammars
 │   ├── tools/
 │   │   ├── exceptions.py         # Custom ToolError exception hierarchy
 │   │   ├── filesystem.py         # Sandboxed FileSystemTool & path safety
@@ -284,12 +334,15 @@ Talos/
 │       └── models.py             # Workspace & ContainerSecurityConfig dataclasses
 └── tests/
     ├── conftest.py               # Shared test fixtures & client lifecycle
+    ├── run_tests.py              # Isolated test runner executing all module suites
     ├── agent/                    # Agent loop, dispatcher, LLM & retry tests
     ├── api/                      # API endpoint, WebSocket, task queries & schema tests
     ├── core/                     # Config, logging, middleware & worker pool tests
     ├── db/                       # Repository and crash recovery test suites
+    ├── fixtures/sample_repo/     # Fixture repository for AST parser and indexer testing
+    ├── indexer/                  # AST parser, indexer lookup & experiment tests
     ├── tools/                    # File system & shell tool test suites
-    └── workspace/                # Manager unit tests, live experiments & security test suite
+    └── workspace/                # Manager unit tests, live experiments & security tests
 ```
 
 ---
@@ -297,3 +350,4 @@ Talos/
 ## License
 
 MIT
+
