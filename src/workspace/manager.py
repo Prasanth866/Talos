@@ -10,6 +10,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 
 import docker
 import docker.errors
@@ -395,6 +396,11 @@ class WorkspaceManager:
         loop = asyncio.get_running_loop()
         stop_event = threading.Event()
 
+        def _safe_put(kind: str, data: Any) -> None:
+            if not loop.is_closed():
+                with contextlib.suppress(RuntimeError):
+                    loop.call_soon_threadsafe(queue.put_nowait, (kind, data))
+
         def _reader_thread() -> None:
             stream = None
             try:
@@ -403,20 +409,16 @@ class WorkspaceManager:
                     if stop_event.is_set():
                         break
                     if stdout_chunk:
-                        loop.call_soon_threadsafe(
-                            queue.put_nowait, ("stdout", stdout_chunk)
-                        )
+                        _safe_put("stdout", stdout_chunk)
                     if stderr_chunk:
-                        loop.call_soon_threadsafe(
-                            queue.put_nowait, ("stderr", stderr_chunk)
-                        )
+                        _safe_put("stderr", stderr_chunk)
             except Exception as exc:
-                loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
+                _safe_put("error", exc)
             finally:
                 if stream is not None and hasattr(stream, "close"):
                     with contextlib.suppress(Exception):
                         stream.close()
-                loop.call_soon_threadsafe(queue.put_nowait, ("eof", None))
+                _safe_put("eof", None)
 
         reader = threading.Thread(
             target=_reader_thread,
