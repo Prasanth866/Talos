@@ -7,7 +7,9 @@ Autonomous software engineering agent framework featuring a tool-use reasoning l
 ## Key Features
 
 - **Autonomous Reasoning Loop**: Step-by-step ReAct-style agent execution loop (`ReasoningLoop`) with dynamic tool dispatching, compact observation limits, adaptive rate-limit (429) backoff, and token/cost tracking.
-- **Docker Workspace Isolation**: Task-isolated container environments (`WorkspaceManager`) with shallow Git repository cloning (`--depth 1`), custom volume mounting, command execution, and structured `WorkspaceError` wrapping.
+- **Docker Workspace Hardening & Isolation**: Task-isolated container environments (`WorkspaceManager`) with shallow Git repository cloning (`--depth 1`), custom volume mounting, memory caps (`512MB`), CPU quotas, process limits (`pids_limit=256`), read-only root filesystems, air-gapped network isolation (`network_mode="none"`), and non-root execution (`user="1000:1000"`).
+- **Async Streaming Command Execution**: Async generator command runner (`execute_command`) yielding line streams in real-time, enforcing a 1MB output cap (`[TRUNCATED]` sentinel), timeout enforcement (`[TIMEOUT]` sentinel), and background process tree termination.
+- **Adversarial Security Test Suite**: Comprehensive security test suite (`tests/workspace/test_security.py`) actively attempting network escape, filesystem escape, fork bombs, memory exhaustion, and path traversal to prove container isolation.
 - **Async Worker Queue & Pool**: Structured concurrency managed via `asyncio.TaskGroup` over a bounded `asyncio.Queue` with configurable worker concurrency.
 - **Persistent Task Store**: Async database persistence using SQLAlchemy and Alembic, tracking complete task lifecycles (`PENDING -> RUNNING -> COMPLETED / FAILED`), token counts, USD cost, and final answers.
 - **Crash Recovery**: Automatic startup recovery identifying any interrupted `RUNNING` tasks from crashes or abrupt server kills and marking them as `FAILED`.
@@ -27,7 +29,7 @@ Autonomous software engineering agent framework featuring a tool-use reasoning l
 ### Prerequisites
 - Python >= 3.14
 - [`uv`](https://github.com/astral-sh/uv)
-- Docker Desktop or Docker Engine (optional, for workspace container isolation)
+- Docker Desktop or Docker Engine (for workspace container isolation)
 
 ### Installation
 ```bash
@@ -59,6 +61,8 @@ Key environment variables:
 - `WORKER_CONCURRENCY`: Number of concurrent async workers in the pool (default: `4`).
 - `TASK_QUEUE_MAX_SIZE`: Maximum bounded task queue size before backpressure (default: `100`).
 - `SHUTDOWN_DRAIN_TIMEOUT_SECONDS`: Maximum seconds to wait for in-flight tasks during graceful shutdown (default: `30.0`).
+- `WORKSPACE_MEM_LIMIT`: Memory limit for sandbox containers (default: `512m`).
+- `WORKSPACE_PIDS_LIMIT`: Maximum concurrent process/thread count per container (default: `256`).
 
 ### Running Locally
 
@@ -73,14 +77,23 @@ uv run fastapi dev src/main.py
 
 ---
 
-## Docker Workspace Manager
+## Docker Workspace Hardening & Streaming Execution
 
-Talos provides isolated task workspaces where each task runs inside its own Docker container with a shallow-cloned Git repository:
+Talos provides isolated, hardened task workspaces where each task runs inside its own Docker container with a shallow-cloned Git repository and layered defense-in-depth:
 
 ```python
-from src.workspace import WorkspaceManager
+from src.workspace import ContainerSecurityConfig, WorkspaceManager
 
-manager = WorkspaceManager()
+# Initialize manager with default or customized hardening
+manager = WorkspaceManager(
+    default_security_config=ContainerSecurityConfig(
+        mem_limit="512m",
+        pids_limit=256,
+        read_only=True,
+        network_mode="none",
+        user="1000:1000",
+    )
+)
 
 # Create an isolated workspace with a shallow clone
 workspace = manager.create(
@@ -89,11 +102,22 @@ workspace = manager.create(
     image="python:3.12-slim",
 )
 
-# Run commands inside the isolated container
+# 1. Synchronous command execution
 result = manager.run_command(
-    workspace.workspace_id, ["python", "-c", "print('Hello from container')"]
+    workspace.workspace_id, ["python3", "-c", "print('Hello from hardened container')"]
 )
 print(result["stdout"])
+
+# 2. Asynchronous streaming command execution with output capping & timeout
+async for output_line in manager.execute_command(
+    workspace.workspace_id,
+    "python3 -c 'for i in range(100): print(f\"step {i}\")'",
+    timeout_s=10.0,
+    max_output_bytes=1024 * 1024,  # 1MB cap
+):
+    print(f"[{output_line.stream}] {output_line.line}")
+    if output_line.is_sentinel:
+        print(f"Sentinel triggered: {output_line.sentinel_type}")
 
 # List files inside workspace
 files = manager.list_files(workspace.workspace_id)
@@ -101,6 +125,13 @@ files = manager.list_files(workspace.workspace_id)
 # Teardown container and delete host directory cleanly
 manager.destroy(workspace.workspace_id)
 ```
+
+### Container Hardening Controls
+- **Memory Ceiling (`mem_limit="512m"`)**: Cgroups terminate memory-hungry runaway processes with `SIGKILL` (exit code 137).
+- **Process Ceiling (`pids_limit=256`)**: Cgroups block fork bomb attacks instantly with `BlockingIOError: [Errno 11] Resource temporarily unavailable`.
+- **Read-Only Root Filesystem (`read_only=True`)**: Prevents modification of system binaries or persistence injection, with writes restricted to `/workspace` and a bounded `tmpfs` at `/tmp`.
+- **Network Isolation (`network_mode="none"`)**: Air-gaps the container namespace, preventing exfiltration or unauthorized outbound traffic.
+- **Unprivileged Execution (`user="1000:1000"`)**: Containers execute under a non-root UID/GID.
 
 ### Typed Error Hierarchy
 All Docker and Git operations are strictly wrapped so no low-level raw exceptions leak to caller code:
@@ -111,6 +142,7 @@ All Docker and Git operations are strictly wrapped so no low-level raw exception
 - `WorkspaceDestroyError`: Container teardown or cleanup failure.
 - `GitCloneError`: Git clone or commit checkout failure.
 - `WorkspaceExecutionError`: Command execution failure inside the container.
+
 
 ---
 
@@ -178,11 +210,17 @@ curl -X DELETE http://localhost:8000/tasks
 ## Running Tests & Quality Checks
 
 ```bash
+# Run pytest across entire repository
+uv run pytest --tb=short -q
+
+# Run adversarial security test suite (network, fs, fork, OOM, traversal)
+uv run pytest tests/workspace/test_security.py -v -s
+
+# Run live Docker workspace experiments
+uv run pytest tests/workspace/test_experiment.py -v -s
+
 # Run pytest with full coverage report
 uv run pytest --cov=src --cov-report=term-missing
-
-# Run live Docker workspace experiment test
-uv run pytest tests/workspace/test_experiment.py -v -s
 
 # Run strict type checking
 uv run mypy src tests migrations
@@ -243,7 +281,7 @@ Talos/
 │       ├── exceptions.py         # Typed WorkspaceError exception hierarchy
 │       ├── git_utils.py          # Shallow clone & commit resolution with GitPython
 │       ├── manager.py            # WorkspaceManager container lifecycle controller
-│       └── models.py             # Workspace dataclass & WorkspaceStatus enum
+│       └── models.py             # Workspace & ContainerSecurityConfig dataclasses
 └── tests/
     ├── conftest.py               # Shared test fixtures & client lifecycle
     ├── agent/                    # Agent loop, dispatcher, LLM & retry tests
@@ -251,7 +289,7 @@ Talos/
     ├── core/                     # Config, logging, middleware & worker pool tests
     ├── db/                       # Repository and crash recovery test suites
     ├── tools/                    # File system & shell tool test suites
-    └── workspace/                # WorkspaceManager unit tests & live Docker experiment
+    └── workspace/                # Manager unit tests, live experiments & security test suite
 ```
 
 ---
