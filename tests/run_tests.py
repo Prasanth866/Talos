@@ -16,6 +16,7 @@ TEST_SUITES = [
     ["tests/indexer/test_chunker.py", "-q"],
     ["tests/indexer/test_embeddings.py", "-q"],
     ["tests/indexer/test_search.py", "-q"],
+    ["tests/integration/test_full_agent_pipeline.py", "-q"],
 ]
 
 

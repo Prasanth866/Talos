@@ -14,14 +14,46 @@ from src.agent.dispatcher import create_default_dispatcher
 from src.agent.llm_client import BaseLLMClient, HTTPLLMClient, MockLLMClient
 from src.agent.loop import ReasoningLoop
 from src.agent.models import TrajectoryStatus
+from src.agent.pipeline import execute_workspace_task
 from src.api.schemas.events import AgentEvent, ErrorEvent
 from src.core.config import ROOT_DIR, Settings, get_settings
 from src.core.logging import get_logger
 from src.db import repository
+from src.workspace.manager import WorkspaceManager
 
 logger = get_logger(__name__)
 
 LoopFactory = Callable[[], ReasoningLoop]
+
+
+def create_default_llm_client(
+    settings: Settings | None = None,
+    llm_client_override: BaseLLMClient | None = None,
+) -> BaseLLMClient:
+    """Creates a default BaseLLMClient based on application configuration."""
+    if llm_client_override is not None:
+        return llm_client_override
+
+    cfg = settings or get_settings()
+    if cfg.llm_api_key.get_secret_value():
+        return HTTPLLMClient(
+            api_key=cfg.llm_api_key.get_secret_value(),
+            base_url=cfg.llm_base_url,
+            model=cfg.llm_model,
+            timeout_seconds=cfg.llm_timeout_seconds,
+            max_retries=cfg.llm_max_retries,
+            initial_delay=cfg.llm_retry_initial_delay,
+            backoff_factor=cfg.llm_retry_backoff_factor,
+        )
+
+    return MockLLMClient(
+        responses=[
+            {
+                "thought": "Processing received task in development mode.",
+                "final_answer": "Task executed successfully (mock mode).",
+            }
+        ]
+    )
 
 
 def create_default_loop(
@@ -31,28 +63,7 @@ def create_default_loop(
     """Creates a default ReasoningLoop instance using app configuration."""
     cfg = settings or get_settings()
     dispatcher = create_default_dispatcher(ROOT_DIR)
-
-    if llm_client_override is not None:
-        llm_client: BaseLLMClient = llm_client_override
-    elif cfg.llm_api_key.get_secret_value():
-        llm_client = HTTPLLMClient(
-            api_key=cfg.llm_api_key.get_secret_value(),
-            base_url=cfg.llm_base_url,
-            model=cfg.llm_model,
-            timeout_seconds=cfg.llm_timeout_seconds,
-            max_retries=cfg.llm_max_retries,
-            initial_delay=cfg.llm_retry_initial_delay,
-            backoff_factor=cfg.llm_retry_backoff_factor,
-        )
-    else:
-        llm_client = MockLLMClient(
-            responses=[
-                {
-                    "thought": "Processing received task in development mode.",
-                    "final_answer": "Task executed successfully (mock mode).",
-                }
-            ]
-        )
+    llm_client = create_default_llm_client(cfg, llm_client_override)
 
     return ReasoningLoop(
         llm_client=llm_client,
@@ -81,6 +92,7 @@ class TaskManager:
         settings: Settings | None = None,
         loop_factory: LoopFactory | None = None,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
+        workspace_manager: WorkspaceManager | None = None,
         max_retained_task_events: int | None = None,
     ) -> None:
         self.settings = settings or get_settings()
@@ -88,6 +100,7 @@ class TaskManager:
             lambda: create_default_loop(self.settings)
         )
         self.session_factory = session_factory
+        self.workspace_manager = workspace_manager
         self.queue: asyncio.Queue[TaskItem | None] = asyncio.Queue(
             maxsize=self.settings.task_queue_max_size
         )
@@ -243,13 +256,28 @@ class TaskManager:
                 await self.broadcast_event(tid, evt)
 
             try:
-                loop = self.loop_factory()
-                trajectory = await loop.run(
-                    task=item.task,
-                    metadata=item.metadata,
-                    on_event=on_event,
-                    task_id=task_id,
-                )
+                repo_url = (item.metadata or {}).get("repo_url")
+                if repo_url and isinstance(repo_url, str):
+                    wm = self.workspace_manager or WorkspaceManager()
+                    llm_client = create_default_llm_client(self.settings)
+                    trajectory, _ = await execute_workspace_task(
+                        task=item.task,
+                        repo_url=repo_url,
+                        workspace_manager=wm,
+                        llm_client=llm_client,
+                        max_steps=self.settings.llm_max_steps,
+                        on_event=on_event,
+                        task_id=task_id,
+                        database_session_factory=self.session_factory,
+                    )
+                else:
+                    loop = self.loop_factory()
+                    trajectory = await loop.run(
+                        task=item.task,
+                        metadata=item.metadata,
+                        on_event=on_event,
+                        task_id=task_id,
+                    )
 
                 if self.session_factory is not None:
                     async with self.session_factory() as session:

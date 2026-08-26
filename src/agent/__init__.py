@@ -25,6 +25,10 @@ from src.agent.models import (
     ToolResult,
     TrajectoryStatus,
 )
+from src.agent.pipeline import (
+    create_workspace_dispatcher,
+    execute_workspace_task,
+)
 from src.agent.prompts import (
     DEFAULT_AGENT_SYSTEM_PROMPT,
     build_system_prompt,
@@ -63,6 +67,8 @@ __all__ = [
     "build_system_prompt",
     "compute_backoff_delay",
     "create_default_dispatcher",
+    "create_workspace_dispatcher",
+    "execute_workspace_task",
     "extract_json_payload",
     "format_tool_doc",
     "is_transient_error",
