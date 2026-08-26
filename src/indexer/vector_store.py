@@ -88,13 +88,83 @@ class PGVectorStore:
 
         if self.session_factory is not None:
             try:
-                pass
+                from src.db.models import CodeChunkModel
+
+                async with (
+                    self.session_factory() as session,
+                    session.begin(),
+                ):
+                    for chunk in chunks:
+                        model = CodeChunkModel(
+                            id=chunk.chunk_id,
+                            file_path=str(chunk.file_path),
+                            symbol_name=chunk.symbol_name,
+                            kind=chunk.kind.value,
+                            signature=chunk.signature,
+                            docstring=chunk.docstring,
+                            code_content=chunk.code_content,
+                            start_line=chunk.line_span.start_line,
+                            end_line=chunk.line_span.end_line,
+                            embedding=chunk.embedding,
+                            metadata_json=chunk.metadata,
+                        )
+                        await session.merge(model)
             except Exception as exc:
-                logger.warning("pgvector_insert_skipped_using_fallback", error=str(exc))
+                logger.debug("pgvector_db_insert_skipped", error=str(exc))
 
     async def search(
         self, query_vector: list[float], top_k: int = 5
     ) -> list[tuple[CodeChunk, float]]:
+        if self.session_factory is not None:
+            try:
+                from pathlib import Path
+
+                from sqlalchemy import select
+
+                from src.db.models import CodeChunkModel
+                from src.indexer.models import LineSpan, SymbolKind
+
+                async with self.session_factory() as session:
+                    stmt = (
+                        select(
+                            CodeChunkModel,
+                            CodeChunkModel.embedding.cosine_distance(
+                                query_vector
+                            ).label("distance"),
+                        )
+                        .where(CodeChunkModel.embedding.is_not(None))
+                        .order_by("distance")
+                        .limit(top_k)
+                    )
+                    result = await session.execute(stmt)
+                    rows = result.all()
+                    if rows:
+                        results: list[tuple[CodeChunk, float]] = []
+                        for model, distance in rows:
+                            score = max(0.0, min(1.0, 1.0 - float(distance)))
+                            chunk = CodeChunk(
+                                chunk_id=model.id,
+                                file_path=Path(model.file_path),
+                                symbol_name=model.symbol_name,
+                                kind=SymbolKind(model.kind),
+                                signature=model.signature,
+                                docstring=model.docstring,
+                                code_content=model.code_content,
+                                line_span=LineSpan(
+                                    start_line=model.start_line,
+                                    end_line=model.end_line,
+                                    start_col=0,
+                                    end_col=0,
+                                ),
+                                embedding_text=model.code_content,
+                                embedding=model.embedding,
+                                metadata=model.metadata_json or {},
+                            )
+                            results.append((chunk, score))
+                        return results
+            except Exception as exc:
+                logger.debug("pgvector_db_search_skipped", error=str(exc))
+
         return await self.fallback.search(query_vector, top_k=top_k)
 
     async def clear(self) -> None:

@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -87,4 +88,31 @@ class Task(Base):
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+
+
+class CodeChunkModel(Base):
+    """SQLAlchemy model representing an indexed code chunk stored with pgvector."""
+
+    __tablename__ = "code_chunks"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    file_path: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    symbol_name: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    signature: Mapped[str] = mapped_column(Text, nullable=False)
+    docstring: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_content: Mapped[str] = mapped_column(Text, nullable=False)
+    start_line: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_line: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(3072), nullable=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
     )
