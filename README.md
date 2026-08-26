@@ -1,6 +1,6 @@
 # Talos
 
-Autonomous software engineering agent framework featuring a tool-use reasoning loop, bounded async worker queues with structured concurrency, graceful shutdown, persistent task state with crash recovery, Docker-based isolated task workspaces, defensive sandboxing, Tree-Sitter AST code indexing, pgvector-powered semantic & hybrid code search, real-time WebSocket event streaming, and a zero-dependency aesthetic web UI.
+Autonomous software engineering agent framework featuring a tool-use reasoning loop, bounded async worker queues with structured concurrency, graceful shutdown, persistent task state with crash recovery, Docker-based isolated task workspaces, defensive sandboxing, native Python AST code indexing with syntax-error recovery, pgvector-powered semantic & hybrid code search, real-time WebSocket event streaming, and a zero-dependency aesthetic web UI.
 
 ---
 
@@ -8,7 +8,7 @@ Autonomous software engineering agent framework featuring a tool-use reasoning l
 
 - **Autonomous Reasoning Loop**: Step-by-step ReAct-style agent execution loop (`ReasoningLoop`) with dynamic tool dispatching, compact observation limits, adaptive rate-limit (429) backoff, and token/cost tracking.
 - **End-to-End Sandbox + Indexer Pipeline**: Full lifecycle orchestration (`execute_workspace_task`) from task submission -> Git clone -> Docker container sandbox boot -> upfront AST & vector indexing -> agent code search -> in-container test execution -> guaranteed workspace teardown.
-- **`tree-sitter` AST Code Indexing**: Incremental, fault-tolerant Python AST indexer (`PythonASTParser`, `CodeIndexer`) extracting function/class signatures, docstrings, typed arguments, inheritance hierarchies, and imports with sub-millisecond per-file latency.
+- **Native Python AST Code Indexing**: Incremental, fault-tolerant Python AST indexer (`PythonASTParser`, `CodeIndexer`) extracting function/class signatures, docstrings, typed arguments, inheritance hierarchies, and imports with sub-millisecond per-file latency and syntax-error recovery.
 - **AST Semantic Chunking**: Chunking engine (`ASTChunker`) that slices code along syntax boundaries (complete functions, classes, and member methods) rather than arbitrary token cuts, preserving signatures, docstrings, decorators, and line spans.
 - **Dense Code Embeddings (Gemini & OpenAI)**: Embeddings integration supporting Google Gemini (`gemini-embedding-001`, 3072 dimensions) and OpenAI (`text-embedding-3-small` / `large`), with batched requests and per-indexing token/cost tracking.
 - **PostgreSQL `pgvector` & In-Memory Vector Store**: Vector database support (`PGVectorStore`) utilizing the `<=>` cosine distance operator in PostgreSQL, with resilient fallback to `InMemoryVectorStore` for local development and SQLite testing.
@@ -60,16 +60,20 @@ cp .env.example .env
 ```
 
 Key environment variables:
-- `DATABASE_URL`: PostgreSQL with asyncpg or SQLite (e.g. `postgresql+asyncpg://postgres:postgres@localhost:5432/talos_db` or `sqlite+aiosqlite:///talos.db`).
-- `GEMINI_API_KEY`: API key for Google Gemini embedding client (`gemini-embedding-001`).
-- `EMBEDDING_PROVIDER`: Embedding provider to use: `gemini`, `openai`, or `mock` (default: `gemini`).
+- `DATABASE_URL`: PostgreSQL with asyncpg or SQLite (e.g. `sqlite+aiosqlite:///talos.db` or `postgresql+asyncpg://postgres:postgres@localhost:5432/talos_db`).
 - `LLM_API_KEY`: API key for LLM provider (e.g. Groq or OpenAI-compatible endpoint; uses Mock LLM if empty).
 - `LLM_BASE_URL`: Base URL for OpenAI-compatible LLM endpoint (default: `https://api.groq.com/openai/v1`).
 - `LLM_MODEL`: Model name (default: `openai/gpt-oss-120b`).
+- `GEMINI_API_KEY`: API key for Google Gemini embedding client (`gemini-embedding-001`; uses Mock Embeddings if empty).
+- `EMBEDDING_MODEL`: Embedding model identifier (default: `gemini-embedding-001`).
+- `EMBEDDING_DIMENSION`: Embedding vector dimensionality (default: `3072`).
 - `WORKER_CONCURRENCY`: Number of concurrent async workers in the pool (default: `4`).
 - `TASK_QUEUE_MAX_SIZE`: Maximum bounded task queue size before backpressure (default: `100`).
 - `WORKSPACE_MEM_LIMIT`: Memory limit for sandbox containers (default: `512m`).
 - `WORKSPACE_PIDS_LIMIT`: Maximum concurrent process/thread count per container (default: `256`).
+- `WORKSPACE_READ_ONLY`: Sandbox read-only root filesystem (default: `true`).
+- `WORKSPACE_NETWORK_MODE`: Sandbox network isolation (default: `none`).
+- `WORKSPACE_USER`: Non-root execution UID/GID (default: `1000:1000`).
 
 ### Running Locally
 
@@ -118,7 +122,7 @@ sequenceDiagram
 
 ## Semantic & Hybrid Code Search
 
-Talos pairs Tree-Sitter AST syntax trees with dense vector embeddings stored in PostgreSQL via `pgvector`:
+Talos pairs native Python AST syntax trees with dense vector embeddings stored in PostgreSQL via `pgvector`:
 
 ```python
 from pathlib import Path
@@ -197,7 +201,7 @@ workspace = manager.create(
 # Streaming execution with output capping & timeout sentinels
 async for output_line in manager.execute_command(
     workspace.workspace_id,
-    "python3 -c 'print("Executing inside hardened container")'",
+    "python3 -c \"print('Executing inside hardened container')\"",
     timeout_s=10.0,
     max_output_bytes=1024 * 1024,
 ):
@@ -251,6 +255,9 @@ Talos/
 ├── migrations/                   # Asynchronous database migration versions
 ├── pyproject.toml                # Project metadata & tool configurations
 ├── static/                       # Zero-dependency frontend (HTML5, CSS3, Vanilla JS)
+│   ├── index.html                # Aesthetic single-page application dashboard
+│   ├── style.css                 # Dark-mode glassmorphic design system
+│   └── app.js                    # Reactive event streaming, WebSocket & history state
 ├── src/
 │   ├── main.py                   # FastAPI app, lifespan database & pgvector initialization
 │   ├── agent/
@@ -279,20 +286,21 @@ Talos/
 │   │   ├── middleware.py         # Correlation ID & request duration middleware
 │   │   └── worker.py             # TaskManager, TaskGroup worker pool & graceful drain
 │   ├── db/
-│   │   ├── models.py             # TaskModel, CodeChunkModel (Vector column) & TaskStatus
+│   │   ├── models.py             # Task, CodeChunkModel (Vector column) & TaskStatus
 │   │   └── repository.py         # Pure-function asynchronous data access layer
 │   ├── indexer/
 │   │   ├── chunker.py            # ASTChunker semantic code partitioner
 │   │   ├── embeddings.py         # GeminiEmbeddingClient, OpenAIEmbeddingClient & CostTracker
 │   │   ├── indexer.py            # CodeIndexer multi-file index & symbol query API
 │   │   ├── models.py             # CodeChunk, Symbol, FunctionDefinition dataclasses
-│   │   ├── parser.py             # PythonASTParser using tree-sitter Python grammars
+│   │   ├── parser.py             # PythonASTParser using native ast module with error recovery
 │   │   ├── search.py             # HybridSearchEngine (exact match + vector fallback)
 │   │   └── vector_store.py       # PGVectorStore (pgvector <=>) & InMemoryVectorStore
 │   ├── tools/
 │   │   ├── exceptions.py         # Custom ToolError exception hierarchy
 │   │   ├── filesystem.py         # Sandboxed FileSystemTool & path safety
-│   │   └── shell.py              # Defensive ShellTool with timeout & process cleanup
+│   │   ├── shell.py              # Defensive ShellTool with timeout & process cleanup
+│   │   └── system_tools.py       # Backward-compatible tool export shim
 │   └── workspace/
 │       ├── exceptions.py         # Typed WorkspaceError exception hierarchy
 │       ├── git_utils.py          # Shallow clone & commit resolution with GitPython
@@ -305,6 +313,7 @@ Talos/
     ├── api/                      # API endpoint, search routes & WebSocket tests
     ├── core/                     # Config, logging, middleware & worker pool tests
     ├── db/                       # Repository and crash recovery test suites
+    ├── fixtures/                 # Sample repos and synthetic test fixtures
     ├── indexer/                  # AST parser, chunker, embeddings & hybrid search tests
     ├── integration/              # Full agent pipeline e2e integration tests
     ├── tools/                    # File system & shell tool test suites

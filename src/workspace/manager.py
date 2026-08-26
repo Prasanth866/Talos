@@ -120,6 +120,7 @@ class WorkspaceManager:
                 name=container_name,
                 command="tail -f /dev/null",
                 detach=True,
+                init=True,
                 volumes={str(host_dir): {"bind": "/workspace", "mode": "rw"}},
                 working_dir="/workspace",
                 environment=env or {},

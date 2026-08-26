@@ -16,8 +16,21 @@ from src.workspace import (
 )
 
 
+@pytest.fixture
+def docker_client() -> docker.DockerClient:
+    """Fixture providing a live Docker client or skips if Docker is not running."""
+    try:
+        client = docker.from_env()
+        client.ping()
+        return client
+    except Exception:
+        pytest.skip("Docker daemon not available for live experiments.")
+
+
 @pytest.mark.integration
-def test_live_workspace_experiment(tmp_path: Path) -> None:
+def test_live_workspace_experiment(
+    tmp_path: Path, docker_client: docker.DockerClient
+) -> None:
     """Experiment: Create a workspace, clone a repo into it, list files, destroy it.
 
     Measures creation time (pull + clone) and verifies complete artifact cleanup.
@@ -37,7 +50,6 @@ def test_live_workspace_experiment(tmp_path: Path) -> None:
 
     repo_url = f"file://{source_repo_dir}"
 
-    docker_client = docker.from_env()
     manager = WorkspaceManager(
         docker_client=docker_client,
         workspace_root=tmp_path / "workspaces",
@@ -88,7 +100,9 @@ def test_live_workspace_experiment(tmp_path: Path) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_live_command_execution_10mb_output_capping(tmp_path: Path) -> None:
+async def test_live_command_execution_10mb_output_capping(
+    tmp_path: Path, docker_client: docker.DockerClient
+) -> None:
     """Experiment 1: Run command producing 10MB+ output.
 
     Verify truncation occurs at 1MB with TRUNCATED sentinel and measure memory.
@@ -102,7 +116,6 @@ async def test_live_command_execution_10mb_output_capping(tmp_path: Path) -> Non
     repo.index.add(["README.md"])
     repo.index.commit("Initial commit")
 
-    docker_client = docker.from_env()
     manager = WorkspaceManager(
         docker_client=docker_client,
         workspace_root=tmp_path / "workspaces",
@@ -163,7 +176,9 @@ async def test_live_command_execution_10mb_output_capping(tmp_path: Path) -> Non
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_live_command_execution_timeout_enforcement(tmp_path: Path) -> None:
+async def test_live_command_execution_timeout_enforcement(
+    tmp_path: Path, docker_client: docker.DockerClient
+) -> None:
     """Experiment 2: Run command sleeping 60s with 5s timeout.
 
     Verify TIMEOUT sentinel and measure termination latency.
@@ -175,7 +190,6 @@ async def test_live_command_execution_timeout_enforcement(tmp_path: Path) -> Non
     repo.index.add(["README.md"])
     repo.index.commit("Initial commit")
 
-    docker_client = docker.from_env()
     manager = WorkspaceManager(
         docker_client=docker_client,
         workspace_root=tmp_path / "workspaces",
@@ -227,10 +241,10 @@ async def test_live_command_execution_timeout_enforcement(tmp_path: Path) -> Non
 
 
 @pytest.mark.integration
-def test_live_container_hardening_experiments(tmp_path: Path) -> None:
+def test_live_container_hardening_experiments(
+    tmp_path: Path, docker_client: docker.DockerClient
+) -> None:
     """Live Docker experiment testing limits, read-only fs, network, non-root user."""
-    docker_client = docker.from_env()
-
     source_repo_dir = tmp_path / "source_repo"
     source_repo_dir.mkdir()
     (source_repo_dir / "README.md").write_text("# Test Repo\n", encoding="utf-8")

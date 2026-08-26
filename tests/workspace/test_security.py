@@ -20,7 +20,11 @@ from src.workspace import (
 @pytest.fixture
 def hardened_workspace(tmp_path: Path) -> tuple[WorkspaceManager, str]:
     """Sets up a live hardened workspace for adversarial security testing."""
-    docker_client = docker.from_env()
+    try:
+        docker_client = docker.from_env()
+        docker_client.ping()
+    except Exception:
+        pytest.skip("Docker daemon not available for live security tests.")
 
     source_repo_dir = tmp_path / "source_repo"
     source_repo_dir.mkdir()
@@ -136,9 +140,17 @@ def test_security_fork_bomb_killed_within_5_seconds(
             or "Errno 11" in str(fork_res["stdout"])
         )
 
-        # Ensure container and host are responsive and unharmed
-        ping_res = manager.run_command(ws_id, "echo 'host_healthy'")
-        assert ping_res["stdout"] == "host_healthy"
+        # Ensure container and host are responsive and unharmed once reaper cleans up
+        ping_res = None
+        for _ in range(10):
+            try:
+                ping_res = manager.run_command(ws_id, "echo 'host_healthy'")
+                if ping_res["stdout"] == "host_healthy":
+                    break
+            except Exception:
+                time.sleep(0.5)
+
+        assert ping_res is not None and ping_res["stdout"] == "host_healthy"
 
     finally:
         manager.destroy(ws_id)
