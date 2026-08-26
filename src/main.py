@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.api.exception_handlers import register_exception_handlers
 from src.api.routes.health import router as health_router
+from src.api.routes.search import router as search_router
 from src.api.routes.tasks import router as tasks_router
 from src.api.routes.websocket import router as websocket_router
 from src.core.config import ROOT_DIR, get_settings
@@ -35,7 +36,27 @@ async def lifespan(fast_app: FastAPI) -> AsyncGenerator[None]:
     fast_app.state.db = db
 
     async with db.engine.begin() as conn:
-        await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn))
+        if db.url.startswith("postgresql"):
+            try:
+                from sqlalchemy import text
+
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+            except Exception as exc:
+                logger.debug("create_extension_vector_skipped", error=str(exc))
+        try:
+            await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn))
+        except Exception as exc:
+            logger.warning("create_all_tables_fallback_without_vector", error=str(exc))
+            await conn.run_sync(
+                lambda sync_conn: Base.metadata.create_all(
+                    sync_conn,
+                    tables=[
+                        t
+                        for name, t in Base.metadata.tables.items()
+                        if name != "code_chunks"
+                    ],
+                )
+            )
 
     async with db.session_factory() as session:
         recovered = await repository.recover_interrupted(session)
@@ -96,6 +117,8 @@ register_exception_handlers(app)
 app.include_router(health_router)
 app.include_router(tasks_router)
 app.include_router(websocket_router)
+app.include_router(search_router)
+
 
 static_dir = ROOT_DIR / "static"
 if static_dir.is_dir():
