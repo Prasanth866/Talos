@@ -136,3 +136,26 @@ class CircuitOpenError(ToolError):
             details=merged_details,
         )
         self.consecutive_failures = consecutive_failures
+
+
+class PatchError(ToolError):
+    """Raised when a unified diff fails to validate or apply cleanly."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        tool_name: str = "apply_patch",
+        reason: str = "PATCH_FAILED",
+        context: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        merged_details = {"reason": reason, "context": context, **(details or {})}
+        super().__init__(
+            message,
+            tool_name=tool_name,
+            code="PATCH_ERROR",
+            details=merged_details,
+        )
+        self.reason = reason
+        self.context = context

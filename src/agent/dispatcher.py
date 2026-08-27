@@ -18,6 +18,7 @@ from src.indexer import (
 )
 from src.tools.exceptions import ToolError
 from src.tools.filesystem import FileSystemTool
+from src.tools.patch import PatchTool
 from src.tools.shell import ShellTool
 
 logger = structlog.get_logger(__name__)
@@ -534,6 +535,36 @@ def create_default_dispatcher(sandbox_dir: Path) -> ToolDispatcher:
                 },
             },
             "required": ["query"],
+        },
+    )
+
+    patch_tool = PatchTool(
+        sandbox_dir=sandbox_dir,
+        indexer=indexer,
+        search_engine=search_engine,
+    )
+
+    async def _apply_patch(patch: str, dry_run: bool = False) -> str:
+        res = await patch_tool.apply_patch(patch=patch, dry_run=dry_run)
+        return str(res["message"])
+
+    dispatcher.register_tool(
+        name="apply_patch",
+        description="Applies unified diff patch with dry-run and auto re-indexing.",
+        handler=_apply_patch,
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "patch": {
+                    "type": "string",
+                    "description": "Unified diff content (--- a/file +++ b/file).",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "If true, validates patch without disk writes.",
+                },
+            },
+            "required": ["patch"],
         },
     )
 

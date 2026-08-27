@@ -76,6 +76,7 @@ async def test_default_dispatcher_file_and_shell_tools(tmp_path: Path) -> None:
         "list_file_structure",
         "semantic_search",
         "hybrid_search",
+        "apply_patch",
     }
 
     # 1. Write file
@@ -167,6 +168,23 @@ def add(a: int, b: int = 1) -> int:
     file_list = ToolCall(tool_name="list_dir", arguments={"path": "test.txt"})
     file_list_res = await dispatcher.execute_tool(file_list)
     assert "is not a directory" in file_list_res.output
+
+    # 10. Apply patch
+    patch_call = ToolCall(
+        tool_name="apply_patch",
+        arguments={
+            "patch": (
+                "--- a/test.txt\n"
+                "+++ b/test.txt\n"
+                "@@ -1,1 +1,1 @@\n"
+                "-hello talos\n"
+                "+hello talos patched\n"
+            ),
+        },
+    )
+    patch_res = await dispatcher.execute_tool(patch_call)
+    assert patch_res.success is True
+    assert "Successfully applied patch" in (patch_res.output or "")
 
 
 @pytest.mark.asyncio
