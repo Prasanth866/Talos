@@ -98,7 +98,7 @@ class ToolDispatcher:
         return tools
 
     async def execute_tool(self, tool_call: ToolCall) -> ToolResult:
-        """Dispatches a tool call safely, returning a structured ToolResult."""
+        """Dispatches a tool call with schema validation."""
         start_time = time.perf_counter()
         tool_name = tool_call.tool_name
 
@@ -108,14 +108,48 @@ class ToolDispatcher:
             return ToolResult(
                 tool_name=tool_name,
                 output="",
-                error=(
-                    f"Unknown tool '{tool_name}'. Available tools are: [{available}]"
-                ),
+                error=f"Unknown tool '{tool_name}'. Available tools are: [{available}]",
+                error_code="UNKNOWN_TOOL",
+                error_details={"available_tools": self.get_tool_names()},
                 success=False,
                 duration_seconds=duration,
             )
 
         tool_def = self._tools[tool_name]
+
+        if tool_def.parameters_schema:
+            try:
+                import jsonschema
+
+                jsonschema.validate(
+                    instance=tool_call.arguments,
+                    schema=tool_def.parameters_schema,
+                )
+            except jsonschema.ValidationError as val_err:
+                duration = time.perf_counter() - start_time
+                err_msg = (
+                    f"Schema validation error for tool '{tool_name}': {val_err.message}"
+                )
+                logger.warning(
+                    "tool_schema_validation_failed",
+                    tool_name=tool_name,
+                    error=val_err.message,
+                    path=list(val_err.path),
+                )
+                return ToolResult(
+                    tool_name=tool_name,
+                    output="",
+                    error=err_msg,
+                    error_code="SCHEMA_VALIDATION_ERROR",
+                    error_details={
+                        "validation_error": val_err.message,
+                        "path": list(val_err.path),
+                        "validator": val_err.validator,
+                    },
+                    success=False,
+                    duration_seconds=duration,
+                )
+
         try:
             kwargs = tool_call.arguments
             if tool_def.is_async:
@@ -145,6 +179,8 @@ class ToolDispatcher:
                 tool_name=tool_name,
                 output=output,
                 error=None,
+                error_code=None,
+                error_details={},
                 success=True,
                 duration_seconds=duration,
             )
@@ -161,6 +197,8 @@ class ToolDispatcher:
                 tool_name=tool_name,
                 output="",
                 error=f"{type(exc).__name__}: {exc.message}",
+                error_code=getattr(exc, "code", "TOOL_ERROR"),
+                error_details=getattr(exc, "details", {}),
                 success=False,
                 duration_seconds=duration,
             )
@@ -176,6 +214,8 @@ class ToolDispatcher:
                 tool_name=tool_name,
                 output="",
                 error=f"Invalid arguments for tool '{tool_name}': {exc}",
+                error_code="INVALID_ARGUMENTS",
+                error_details={"error": str(exc)},
                 success=False,
                 duration_seconds=duration,
             )
@@ -188,12 +228,15 @@ class ToolDispatcher:
                 exc_info=True,
             )
             err_msg = (
-                f"Unexpected error executing '{tool_name}': {type(exc).__name__}: {exc}"
+                f"Unexpected error executing tool '{tool_name}': "
+                f"{type(exc).__name__}: {exc}"
             )
             return ToolResult(
                 tool_name=tool_name,
                 output="",
                 error=err_msg,
+                error_code="EXECUTION_ERROR",
+                error_details={"error_type": type(exc).__name__, "message": str(exc)},
                 success=False,
                 duration_seconds=duration,
             )

@@ -128,15 +128,20 @@ class MockLLMClient(BaseLLMClient):
 
     def __init__(
         self,
-        responses: Sequence[str | dict[str, Any] | Exception] | None = None,
+        responses: Sequence[str | dict[str, Any] | LLMResponse | Exception]
+        | None = None,
         model_name: str = "mock-model",
         token_tracker: TokenTracker | None = None,
     ) -> None:
-        self.responses: list[str | dict[str, Any] | Exception] = list(responses or [])
+        self.responses: list[str | dict[str, Any] | LLMResponse | Exception] = list(
+            responses or []
+        )
         self.call_history: list[list[Message]] = []
         self.token_tracker = token_tracker or TokenTracker(model_name=model_name)
 
-    def add_response(self, response: str | dict[str, Any] | Exception) -> None:
+    def add_response(
+        self, response: str | dict[str, Any] | LLMResponse | Exception
+    ) -> None:
         self.responses.append(response)
 
     async def generate_response(
@@ -154,6 +159,9 @@ class MockLLMClient(BaseLLMClient):
 
         if isinstance(item, Exception):
             raise item
+
+        if isinstance(item, LLMResponse):
+            return item
 
         prompt_len = sum(len(m.content) for m in messages)
         prompt_tokens = max(1, prompt_len // 4)

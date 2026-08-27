@@ -1,10 +1,15 @@
-"""Agent package — reasoning loop, tool dispatch, retry, and token tracking."""
+"""Agent package.
 
+Reasoning loop, tool dispatch, retry, LangGraph state machine, and token tracking.
+"""
+
+from src.agent.context import ContextManager
 from src.agent.dispatcher import (
     ToolDefinition,
     ToolDispatcher,
     create_default_dispatcher,
 )
+from src.agent.graph import LangGraphAgent
 from src.agent.llm_client import (
     BaseLLMClient,
     HTTPLLMClient,
@@ -14,14 +19,18 @@ from src.agent.llm_client import (
 )
 from src.agent.loop import ReasoningLoop
 from src.agent.models import (
+    AgentStatus,
     AgentStep,
     CostRates,
     LLMResponse,
     Message,
     MessageRole,
+    Plan,
+    PlanStep,
     ReasoningTrajectory,
     TokenUsage,
     ToolCall,
+    ToolExecutionRecord,
     ToolResult,
     TrajectoryStatus,
 )
@@ -41,20 +50,27 @@ from src.agent.retry import (
     retry_async,
     retry_sync,
 )
+from src.agent.state import AgentState, create_initial_agent_state
 from src.agent.token_tracker import MODEL_PRICING, TokenTracker
 
 __all__ = [
     "DEFAULT_AGENT_SYSTEM_PROMPT",
     "MODEL_PRICING",
+    "AgentState",
+    "AgentStatus",
     "AgentStep",
     "BaseLLMClient",
+    "ContextManager",
     "CostRates",
     "HTTPLLMClient",
     "LLMResponse",
+    "LangGraphAgent",
     "Message",
     "MessageRole",
     "MockLLMClient",
     "NonRetryableError",
+    "Plan",
+    "PlanStep",
     "ReasoningLoop",
     "ReasoningTrajectory",
     "TokenTracker",
@@ -62,11 +78,13 @@ __all__ = [
     "ToolCall",
     "ToolDefinition",
     "ToolDispatcher",
+    "ToolExecutionRecord",
     "ToolResult",
     "TrajectoryStatus",
     "build_system_prompt",
     "compute_backoff_delay",
     "create_default_dispatcher",
+    "create_initial_agent_state",
     "create_workspace_dispatcher",
     "execute_workspace_task",
     "extract_json_payload",

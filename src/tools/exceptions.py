@@ -9,11 +9,13 @@ class ToolError(Exception):
         message: str,
         *,
         tool_name: str,
+        code: str = "TOOL_ERROR",
         details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.tool_name = tool_name
+        self.code = code
         self.details = details or {}
 
     def to_dict(self) -> dict[str, Any]:
@@ -21,9 +23,30 @@ class ToolError(Exception):
         return {
             "error": self.__class__.__name__,
             "tool_name": self.tool_name,
+            "code": self.code,
             "message": self.message,
             "details": self.details,
         }
+
+
+class ToolValidationError(ToolError):
+    """Raised when tool arguments fail schema validation before execution."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        tool_name: str,
+        validation_error: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        merged_details = {"validation_error": validation_error, **(details or {})}
+        super().__init__(
+            message,
+            tool_name=tool_name,
+            code="SCHEMA_VALIDATION_ERROR",
+            details=merged_details,
+        )
 
 
 class PathTraversalError(ToolError):
@@ -38,7 +61,12 @@ class PathTraversalError(ToolError):
         details: dict[str, Any] | None = None,
     ) -> None:
         merged_details = {"attempted_path": attempted_path, **(details or {})}
-        super().__init__(message, tool_name=tool_name, details=merged_details)
+        super().__init__(
+            message,
+            tool_name=tool_name,
+            code="PATH_TRAVERSAL",
+            details=merged_details,
+        )
         self.attempted_path = attempted_path
 
 
@@ -54,7 +82,12 @@ class ExecutionTimeoutError(ToolError):
         details: dict[str, Any] | None = None,
     ) -> None:
         merged_details = {"timeout_seconds": timeout_seconds, **(details or {})}
-        super().__init__(message, tool_name=tool_name, details=merged_details)
+        super().__init__(
+            message,
+            tool_name=tool_name,
+            code="TIMEOUT",
+            details=merged_details,
+        )
         self.timeout_seconds = timeout_seconds
 
 
@@ -71,6 +104,11 @@ class CommandExecutionError(ToolError):
         details: dict[str, Any] | None = None,
     ) -> None:
         merged_details = {"exit_code": exit_code, "stderr": stderr, **(details or {})}
-        super().__init__(message, tool_name=tool_name, details=merged_details)
+        super().__init__(
+            message,
+            tool_name=tool_name,
+            code="COMMAND_FAILED",
+            details=merged_details,
+        )
         self.exit_code = exit_code
         self.stderr = stderr
