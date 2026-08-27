@@ -18,7 +18,7 @@ logger = structlog.get_logger(__name__)
 
 def parse_pytest_output(output: str) -> TestResult:
     """Parses raw pytest console output into a structured TestResult object."""
-    cleaned = output.strip()
+    cleaned = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", output).strip()
     if not cleaned:
         return TestResult(summary="No test output produced", all_passed=False)
 
@@ -28,8 +28,6 @@ def parse_pytest_output(output: str) -> TestResult:
     skipped = 0
     failure_details: list[str] = []
 
-    # 1. Match standard pytest summary line: e.g. "=== 2 failed, 3 passed in 1.45s ==="
-    # or "=== 5 passed in 0.12s ===" or "=== 1 error, 2 passed ==="
     summary_match = re.search(
         r"=+\s*(?:short test summary info|.*?)\s*([0-9\w\s,]+)\s+in\s+[\d\.]+s\s*=+",
         cleaned,
@@ -37,7 +35,6 @@ def parse_pytest_output(output: str) -> TestResult:
     )
     summary_text = summary_match.group(1) if summary_match else ""
 
-    # Parse counts with regexes
     passed_m = re.search(r"(\d+)\s+passed", cleaned, re.IGNORECASE)
     if passed_m:
         passed = int(passed_m.group(1))
@@ -56,7 +53,6 @@ def parse_pytest_output(output: str) -> TestResult:
 
     total = passed + failed + errors + skipped
 
-    # 2. Extract failure summaries (FAILED test_path::test_name - Reason)
     for line in cleaned.splitlines():
         line_str = line.strip()
         if line_str.startswith("FAILED ") or " ERROR " in line_str:

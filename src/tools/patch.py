@@ -143,29 +143,30 @@ def apply_hunks_to_content(
 ) -> str:
     """Applies a list of hunks in-memory to original file content.
 
-    Validates context lines and line numbers strictly.
+    Validates context lines and line numbers strictly with CRLF normalization.
     """
-    orig_lines = original_content.splitlines(keepends=False) if original_content else []
+    orig_lines = (
+        original_content.replace("\r\n", "\n").splitlines(keepends=False)
+        if original_content
+        else []
+    )
     patched_lines: list[str] = []
     orig_idx = 0
 
     for hunk in hunks:
-        # 1-based start line to 0-based index
         target_idx = max(0, hunk.old_start - 1)
 
-        # Copy unchanged lines before the hunk
         while orig_idx < target_idx and orig_idx < len(orig_lines):
             patched_lines.append(orig_lines[orig_idx])
             orig_idx += 1
 
-        # Process hunk lines
         for hunk_line in hunk.lines:
             if not hunk_line:
                 continue
             marker = hunk_line[0]
-            content = hunk_line[1:]
+            content = hunk_line[1:].rstrip("\r")
 
-            if marker == " ":  # Context line: must match original
+            if marker == " ":
                 if orig_idx >= len(orig_lines):
                     raise PatchError(
                         f"Hunk @@ -{hunk.old_start},{hunk.old_count} failed: "
@@ -186,7 +187,7 @@ def apply_hunks_to_content(
                 patched_lines.append(orig_lines[orig_idx])
                 orig_idx += 1
 
-            elif marker == "-":  # Removal line: must match original
+            elif marker == "-":
                 if orig_idx >= len(orig_lines):
                     raise PatchError(
                         f"Hunk @@ -{hunk.old_start},{hunk.old_count} failed in "
@@ -252,7 +253,6 @@ class PatchTool:
         total_added = 0
         total_removed = 0
 
-        # Phase 1: Dry-Run In-Memory Validation across all file patches
         for file_patch in file_patches:
             target_rel = (
                 file_patch.new_file if not file_patch.is_delete else file_patch.old_file
@@ -281,12 +281,10 @@ class PatchTool:
                     )
                 orig_content = target_abs.read_text(encoding="utf-8", errors="replace")
 
-            # Apply hunks in memory
             new_content = apply_hunks_to_content(
                 orig_content, file_patch.hunks, file_path=target_rel
             )
 
-            # Count additions and deletions
             for h in file_patch.hunks:
                 for line in h.lines:
                     if line.startswith("+"):
@@ -316,7 +314,6 @@ class PatchTool:
                 "lines_removed": total_removed,
             }
 
-        # Phase 2: Atomic Disk Application
         modified_files: list[str] = []
         for change in planned_changes:
             fp: FilePatch = change["file_patch"]
@@ -332,7 +329,6 @@ class PatchTool:
 
             modified_files.append(path_rel)
 
-        # Phase 3: Incremental Auto Re-Indexing
         reindexed_files: list[str] = []
         for change in planned_changes:
             fp = change["file_patch"]
@@ -342,7 +338,6 @@ class PatchTool:
             if fp.is_delete:
                 continue
 
-            # 1. Update AST CodeIndexer
             if self.indexer is not None:
                 try:
                     self.indexer.index_file(path_abs)
@@ -354,7 +349,6 @@ class PatchTool:
                         error=str(exc),
                     )
 
-            # 2. Update Vector Semantic HybridSearchEngine
             if self.search_engine is not None:
                 try:
                     await self.search_engine.index_file(path_abs)
