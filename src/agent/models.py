@@ -266,3 +266,24 @@ class ToolExecutionRecord(BaseModel):
         status_flag = "OK" if self.success else "FAIL"
         action_str = f"[Step {self.step}] {self.tool_name}({self.arguments})"
         return f"{action_str} -> ({status_flag}) {out_preview}"
+
+
+class CircuitState(StrEnum):
+    """Operational states for the agent circuit breaker."""
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class TestResult(BaseModel):
+    """Parsed structured outcome of a test suite execution."""
+
+    passed: int = 0
+    failed: int = 0
+    errors: int = 0
+    skipped: int = 0
+    total: int = 0
+    summary: str = ""
+    all_passed: bool = False
+    failure_details: list[str] = Field(default_factory=list)

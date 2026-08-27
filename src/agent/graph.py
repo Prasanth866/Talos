@@ -26,6 +26,12 @@ from src.agent.models import (
     ToolExecutionRecord,
 )
 from src.agent.prompts import DEFAULT_AGENT_SYSTEM_PROMPT
+from src.agent.reflection import (
+    CircuitBreaker,
+    calculate_backoff_delay,
+    generate_failure_report,
+    parse_pytest_output,
+)
 from src.agent.state import AgentState, create_initial_agent_state
 
 logger = structlog.get_logger(__name__)
@@ -85,12 +91,14 @@ class LangGraphAgent:
         context_manager: ContextManager | None = None,
         checkpointer: SqliteSaver | None = None,
         db_path: str | Path | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
         max_retries: int = 3,
         max_steps: int = 30,
     ) -> None:
         self.llm_client = llm_client
         self.dispatcher = dispatcher
         self.context_manager = context_manager or ContextManager()
+        self.circuit_breaker = circuit_breaker or CircuitBreaker(failure_threshold=3)
         self.max_retries = max_retries
         self.max_steps = max_steps
 
@@ -309,34 +317,145 @@ class LangGraphAgent:
         }
 
     def _reflection_node(self, state: AgentState) -> dict[str, Any]:
-        """Evaluates step progress and updates plan step status."""
+        """Evaluates step progress, parses tests, and manages bounded retries."""
+        task = state.get("task", "")
         plan = state.get("plan")
         current_step_index = state.get("current_step_index", 0)
         tool_history = state.get("tool_history", [])
         reflection_history = list(state.get("reflection_history", []))
+        retry_count = state.get("retry_count", 0)
+        last_error = state.get("last_error")
 
-        if tool_history:
-            last_record = tool_history[-1]
+        if not tool_history:
+            return {"status": AgentStatus.EXECUTING.value}
+
+        last_record = tool_history[-1]
+
+        # Check if output contains pytest summary info
+        test_result = None
+        output_lower = last_record.output.lower()
+        if (
+            "passed in" in output_lower
+            or "failed in" in output_lower
+            or "passed," in output_lower
+            or "failed," in output_lower
+            or "=== short test summary" in output_lower
+        ):
+            test_result = parse_pytest_output(last_record.output)
+
+        is_step_success = last_record.success
+        if test_result and not test_result.all_passed:
+            is_step_success = False
+
+        # --- SUCCESS PATH ---
+        if is_step_success:
+            self.circuit_breaker.record_success()
+
             reflection = (
-                f"Step {last_record.step}: Executed {last_record.tool_name} "
-                f"({'Success' if last_record.success else 'Failed'})."
+                f"Step {last_record.step}: Executed "
+                f"{last_record.tool_name} successfully."
             )
+            if test_result:
+                reflection += f" Tests: {test_result.summary}."
             reflection_history.append(reflection)
 
-        # Advance plan step if applicable
-        next_step_index = current_step_index
-        if (
-            plan
-            and plan.steps
-            and current_step_index < len(plan.steps)
-            and tool_history
-            and tool_history[-1].success
-        ):
-            plan.steps[current_step_index].status = "completed"
-            next_step_index += 1
+            next_step_index = current_step_index
+            if plan and plan.steps and current_step_index < len(plan.steps):
+                plan.steps[current_step_index].status = "completed"
+                next_step_index += 1
+
+            return {
+                "current_step_index": next_step_index,
+                "reflection_history": reflection_history,
+                "retry_count": 0,
+                "consecutive_failures": 0,
+                "test_result": test_result,
+                "error": None,
+                "status": AgentStatus.EXECUTING.value,
+            }
+
+        # --- FAILURE PATH ---
+        tripped = self.circuit_breaker.record_failure()
+        consec_failures = self.circuit_breaker.consecutive_failures
+
+        # 1. Circuit Breaker tripped
+        if tripped or self.circuit_breaker.is_open:
+            logger.error(
+                "langgraph.circuit_breaker_tripped",
+                consecutive_failures=consec_failures,
+            )
+            report = generate_failure_report(
+                task=task,
+                plan=plan,
+                tool_history=tool_history,
+                last_error=last_error,
+                retry_count=retry_count,
+                test_result=test_result,
+            )
+            circuit_err = (
+                f"CircuitOpenError: Circuit breaker tripped after "
+                f"{consec_failures} consecutive failures\n\n{report}"
+            )
+            reflection_history.append(
+                f"Circuit breaker tripped after {consec_failures} failures."
+            )
+            return {
+                "status": AgentStatus.FAILED.value,
+                "error": circuit_err,
+                "consecutive_failures": consec_failures,
+                "test_result": test_result,
+                "reflection_history": reflection_history,
+            }
+
+        # 2. Bounded retries check
+        new_retry = retry_count + 1
+        if new_retry >= self.max_retries:
+            logger.warning(
+                "langgraph.max_retries_exceeded",
+                retry_count=new_retry,
+                max_retries=self.max_retries,
+            )
+            report = generate_failure_report(
+                task=task,
+                plan=plan,
+                tool_history=tool_history,
+                last_error=last_error,
+                retry_count=new_retry,
+                test_result=test_result,
+            )
+            reflection_history.append(
+                f"Step {last_record.step} failed. Reached max retries "
+                f"({new_retry}/{self.max_retries})."
+            )
+            return {
+                "status": AgentStatus.FAILED.value,
+                "error": report,
+                "retry_count": new_retry,
+                "consecutive_failures": consec_failures,
+                "test_result": test_result,
+                "reflection_history": reflection_history,
+            }
+
+        # 3. Exponential backoff and retry
+        backoff_delay = calculate_backoff_delay(new_retry)
+        logger.info(
+            "langgraph.step_retry_scheduled",
+            retry_count=new_retry,
+            backoff_delay=backoff_delay,
+        )
+        reflection = (
+            f"Step {last_record.step} failed ({last_record.tool_name}). "
+            f"Retrying ({new_retry}/{self.max_retries}) "
+            f"with backoff {backoff_delay:.1f}s."
+        )
+        if test_result:
+            reflection += f" Test failures: {test_result.summary}."
+        reflection_history.append(reflection)
 
         return {
-            "current_step_index": next_step_index,
+            "retry_count": new_retry,
+            "consecutive_failures": consec_failures,
+            "test_result": test_result,
             "reflection_history": reflection_history,
             "status": AgentStatus.EXECUTING.value,
         }

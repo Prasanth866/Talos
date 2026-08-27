@@ -40,6 +40,8 @@ class AgentState(TypedDict, total=False):
     final_answer: str | None
     error: str | None
     last_error: dict[str, Any] | None
+    consecutive_failures: int
+    test_result: Any
     workspace_id: str | None
     total_tokens: TokenUsage
     metadata: dict[str, Any]
@@ -65,6 +67,8 @@ def create_initial_agent_state(
         "final_answer": None,
         "error": None,
         "last_error": None,
+        "consecutive_failures": 0,
+        "test_result": None,
         "workspace_id": workspace_id,
         "total_tokens": TokenUsage(),
         "metadata": dict(metadata or {}),

@@ -21,6 +21,7 @@ from src.agent.loop import ReasoningLoop
 from src.agent.models import (
     AgentStatus,
     AgentStep,
+    CircuitState,
     CostRates,
     LLMResponse,
     Message,
@@ -28,6 +29,7 @@ from src.agent.models import (
     Plan,
     PlanStep,
     ReasoningTrajectory,
+    TestResult,
     TokenUsage,
     ToolCall,
     ToolExecutionRecord,
@@ -42,6 +44,12 @@ from src.agent.prompts import (
     DEFAULT_AGENT_SYSTEM_PROMPT,
     build_system_prompt,
     format_tool_doc,
+)
+from src.agent.reflection import (
+    CircuitBreaker,
+    calculate_backoff_delay,
+    generate_failure_report,
+    parse_pytest_output,
 )
 from src.agent.retry import (
     NonRetryableError,
@@ -60,6 +68,8 @@ __all__ = [
     "AgentStatus",
     "AgentStep",
     "BaseLLMClient",
+    "CircuitBreaker",
+    "CircuitState",
     "ContextManager",
     "CostRates",
     "HTTPLLMClient",
@@ -73,6 +83,7 @@ __all__ = [
     "PlanStep",
     "ReasoningLoop",
     "ReasoningTrajectory",
+    "TestResult",
     "TokenTracker",
     "TokenUsage",
     "ToolCall",
@@ -82,6 +93,7 @@ __all__ = [
     "ToolResult",
     "TrajectoryStatus",
     "build_system_prompt",
+    "calculate_backoff_delay",
     "compute_backoff_delay",
     "create_default_dispatcher",
     "create_initial_agent_state",
@@ -89,8 +101,10 @@ __all__ = [
     "execute_workspace_task",
     "extract_json_payload",
     "format_tool_doc",
+    "generate_failure_report",
     "is_transient_error",
     "parse_llm_response_content",
+    "parse_pytest_output",
     "retry_async",
     "retry_sync",
 ]

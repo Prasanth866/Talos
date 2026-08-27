@@ -112,3 +112,27 @@ class CommandExecutionError(ToolError):
         )
         self.exit_code = exit_code
         self.stderr = stderr
+
+
+class CircuitOpenError(ToolError):
+    """Raised when the agent circuit breaker trips due to consecutive failures."""
+
+    def __init__(
+        self,
+        message: str = "Circuit breaker is OPEN due to consecutive failures",
+        *,
+        tool_name: str = "circuit_breaker",
+        consecutive_failures: int = 3,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        merged_details = {
+            "consecutive_failures": consecutive_failures,
+            **(details or {}),
+        }
+        super().__init__(
+            message,
+            tool_name=tool_name,
+            code="CIRCUIT_OPEN",
+            details=merged_details,
+        )
+        self.consecutive_failures = consecutive_failures
