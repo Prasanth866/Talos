@@ -13,8 +13,12 @@ class SymbolKind(StrEnum):
     ASYNC_FUNCTION = "async_function"
     METHOD = "method"
     CLASS = "class"
+    INTERFACE = "interface"
     IMPORT = "import"
     VARIABLE = "variable"
+    TAG = "tag"
+    RULE = "rule"
+    PROPERTY = "property"
 
 
 @dataclass(frozen=True)

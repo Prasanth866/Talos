@@ -55,3 +55,38 @@ def test_chunk_directory_recursive() -> None:
     assert "Calculator" in symbol_names
     assert "Calculator.multiply" in symbol_names
     assert "async_fetch_data" in symbol_names
+
+
+def test_chunk_multi_language_source(tmp_path: Path) -> None:
+    """Unit test: chunker chunks JS, Java, HTML, and CSS files."""
+    chunker = ASTChunker()
+
+    js_file = tmp_path / "app.js"
+    js_file.write_text("""
+class AuthService {
+    async login(user, pass) {
+        return true;
+    }
+}
+function logout() {
+    return false;
+}
+""")
+
+    css_file = tmp_path / "styles.css"
+    css_file.write_text("""
+.navbar {
+    background-color: blue;
+}
+#footer {
+    color: white;
+}
+""")
+
+    chunks = chunker.chunk_directory(tmp_path)
+    sym_names = [c.symbol_name for c in chunks]
+    assert "AuthService" in sym_names
+    assert "AuthService.login" in sym_names
+    assert "logout" in sym_names
+    assert ".navbar" in sym_names
+    assert "#footer" in sym_names

@@ -146,3 +146,46 @@ def test_live_project_indexing_experiment() -> None:
         if c.name == "WorkspaceManager"
         for m in c.methods
     )
+
+
+def test_index_multi_language_project(tmp_path: Path) -> None:
+    """Unit test: indexer indexes multi-language project (JS, Java, HTML, CSS)."""
+    indexer = CodeIndexer()
+
+    (tmp_path / "UserService.java").write_text("""
+package com.app;
+public class UserService {
+    public User findUser(String id) {
+        return null;
+    }
+}
+""")
+
+    (tmp_path / "script.js").write_text("""
+function initApp() {
+    console.log("ready");
+}
+""")
+
+    (tmp_path / "index.html").write_text("""
+<!DOCTYPE html>
+<html>
+<body>
+    <header id="top-bar">Nav</header>
+</body>
+</html>
+""")
+
+    (tmp_path / "style.css").write_text("""
+#top-bar {
+    background: #000;
+}
+""")
+
+    indexed = indexer.index_directory(tmp_path)
+    assert indexed == 4
+
+    assert len(indexer.get_symbol_definition("UserService")) >= 1
+    assert len(indexer.get_symbol_definition("initApp")) >= 1
+    assert len(indexer.get_symbol_definition("header#top-bar")) >= 1
+    assert len(indexer.get_symbol_definition("#top-bar")) >= 1

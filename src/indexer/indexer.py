@@ -8,14 +8,17 @@ from src.indexer.models import (
     ImportDefinition,
     Symbol,
 )
-from src.indexer.parser import PythonASTParser
+from src.indexer.parser import (
+    EXTENSION_LANGUAGE_MAP,
+    TreeSitterParser,
+)
 
 
 class CodeIndexer:
-    """In-memory code indexer managing multi-file Python symbol indexes."""
+    """In-memory code indexer managing multi-language symbol indexes."""
 
-    def __init__(self, parser: PythonASTParser | None = None) -> None:
-        self.parser = parser or PythonASTParser()
+    def __init__(self, parser: TreeSitterParser | None = None) -> None:
+        self.parser = parser or TreeSitterParser()
         self._files: dict[Path, FileStructure] = {}
         self._symbols_by_name: dict[str, list[Symbol]] = {}
 
@@ -29,23 +32,37 @@ class CodeIndexer:
         return structure
 
     def index_file(self, file_path: Path | str) -> FileStructure:
-        """Reads and indexes a single Python file from disk."""
+        """Reads and indexes a single source code file from disk."""
         path_obj = Path(file_path).resolve()
         content = path_obj.read_bytes()
         return self.index_source(path_obj, content)
 
-    def index_directory(self, directory: Path | str, recursive: bool = True) -> int:
-        """Indexes all Python files in the specified directory."""
+    def index_directory(
+        self,
+        directory: Path | str,
+        recursive: bool = True,
+        extensions: list[str] | None = None,
+    ) -> int:
+        """Indexes all supported code files in the specified directory."""
         dir_obj = Path(directory).resolve()
         if not dir_obj.exists() or not dir_obj.is_dir():
             return 0
 
-        pattern = "**/*.py" if recursive else "*.py"
+        ext_set = (
+            {
+                ext.lower() if ext.startswith(".") else f".{ext.lower()}"
+                for ext in extensions
+            }
+            if extensions is not None
+            else set(EXTENSION_LANGUAGE_MAP.keys())
+        )
+
         indexed_count = 0
-        for py_file in dir_obj.glob(pattern):
-            if py_file.is_file():
+        files = dir_obj.rglob("*") if recursive else dir_obj.glob("*")
+        for file_path in files:
+            if file_path.is_file() and file_path.suffix.lower() in ext_set:
                 with contextlib.suppress(Exception):
-                    self.index_file(py_file)
+                    self.index_file(file_path)
                     indexed_count += 1
         return indexed_count
 
@@ -53,7 +70,6 @@ class CodeIndexer:
         self, path_obj: Path, structure: FileStructure
     ) -> None:
         """Stores file structure and updates the global symbol lookup table."""
-        # Remove previously indexed symbols for this file if re-indexing
         if path_obj in self._files:
             old_structure = self._files[path_obj]
             for sym_name in old_structure.symbols:

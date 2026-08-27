@@ -11,7 +11,10 @@ from src.indexer.models import (
     LineSpan,
     SymbolKind,
 )
-from src.indexer.parser import PythonASTParser
+from src.indexer.parser import (
+    EXTENSION_LANGUAGE_MAP,
+    TreeSitterParser,
+)
 
 
 @dataclass
@@ -50,15 +53,15 @@ class CodeChunk:
 
 
 class ASTChunker:
-    """Splits Python source code into contextual semantic chunks based on AST units."""
+    """Splits source code into contextual semantic chunks from AST units."""
 
-    def __init__(self, parser: PythonASTParser | None = None) -> None:
-        self.parser = parser or PythonASTParser()
+    def __init__(self, parser: TreeSitterParser | None = None) -> None:
+        self.parser = parser or TreeSitterParser()
 
     def chunk_file(
         self, file_path: Path | str, source_code: str | None = None
     ) -> list[CodeChunk]:
-        """Parses and chunks a single Python file into AST semantic units."""
+        """Parses and chunks a source file into AST semantic units."""
         path_obj = Path(file_path).resolve()
         if source_code is None:
             if not path_obj.exists():
@@ -96,22 +99,75 @@ class ASTChunker:
             if module_chunk is not None:
                 chunks.append(module_chunk)
 
+        handled_spans = {c.line_span for c in chunks}
+        for _sym_key, sym in structure.symbols.items():
+            if sym.kind in (
+                SymbolKind.FUNCTION,
+                SymbolKind.ASYNC_FUNCTION,
+                SymbolKind.CLASS,
+                SymbolKind.METHOD,
+                SymbolKind.IMPORT,
+            ):
+                continue
+            if sym.line_span in handled_spans:
+                continue
+
+            code_content = self._extract_source_lines(lines, sym.line_span)
+            chunk_id = (
+                f"{structure.file_path}:{sym.name}:{sym.line_span.start_line}:"
+                f"{sym.line_span.end_line}"
+            )
+            embedding_text = (
+                f"File: {structure.file_path.name}\n"
+                f"Symbol: {sym.name} ({sym.kind.value})\n"
+                f"Signature: {sym.signature}\n"
+                f"Code:\n{code_content}"
+            )
+            chunks.append(
+                CodeChunk(
+                    chunk_id=chunk_id,
+                    file_path=structure.file_path,
+                    symbol_name=sym.name,
+                    kind=sym.kind,
+                    signature=sym.signature,
+                    docstring=sym.docstring,
+                    code_content=code_content,
+                    line_span=sym.line_span,
+                    embedding_text=embedding_text,
+                    token_count=self._estimate_token_count(embedding_text),
+                    metadata={"kind": sym.kind.value},
+                )
+            )
+            handled_spans.add(sym.line_span)
+
         return chunks
 
     def chunk_directory(
-        self, directory: Path | str, recursive: bool = True
+        self,
+        directory: Path | str,
+        recursive: bool = True,
+        extensions: list[str] | None = None,
     ) -> list[CodeChunk]:
-        """Recursively parses and chunks all Python files in a directory."""
+        """Recursively parses and chunks all supported files in a directory."""
         dir_obj = Path(directory).resolve()
         if not dir_obj.exists() or not dir_obj.is_dir():
             return []
 
-        pattern = "**/*.py" if recursive else "*.py"
+        ext_set = (
+            {
+                ext.lower() if ext.startswith(".") else f".{ext.lower()}"
+                for ext in extensions
+            }
+            if extensions is not None
+            else set(EXTENSION_LANGUAGE_MAP.keys())
+        )
+
         all_chunks: list[CodeChunk] = []
-        for py_file in dir_obj.glob(pattern):
-            if py_file.is_file():
+        files = dir_obj.rglob("*") if recursive else dir_obj.glob("*")
+        for file_path in files:
+            if file_path.is_file() and file_path.suffix.lower() in ext_set:
                 try:
-                    file_chunks = self.chunk_file(py_file)
+                    file_chunks = self.chunk_file(file_path)
                     all_chunks.extend(file_chunks)
                 except Exception:  # noqa: S110
                     pass
@@ -266,3 +322,6 @@ class ASTChunker:
             token_count=self._estimate_token_count(embedding_text),
             metadata={"import_count": len(import_statements)},
         )
+
+
+MultiLanguageChunker = ASTChunker
