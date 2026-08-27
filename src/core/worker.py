@@ -79,6 +79,8 @@ class TaskItem:
     task_id: str
     task: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    max_tokens: int | None = None
+    max_cost_usd: float | None = None
 
 
 class TaskManager:
@@ -140,6 +142,8 @@ class TaskManager:
         task_id: str,
         task: str,
         metadata: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        max_cost_usd: float | None = None,
     ) -> bool:
         """Submits a new task to the bounded queue.
 
@@ -157,6 +161,8 @@ class TaskManager:
                 task_id=task_id,
                 task=task,
                 metadata=metadata or {},
+                max_tokens=max_tokens,
+                max_cost_usd=max_cost_usd,
             )
             self.queue.put_nowait(item)
             logger.info(
@@ -272,6 +278,13 @@ class TaskManager:
                     )
                 else:
                     loop = self.loop_factory()
+                    tracker = getattr(loop.llm_client, "token_tracker", None)
+                    if tracker is not None:
+                        if item.max_tokens is not None:
+                            tracker.max_tokens = item.max_tokens
+                        if item.max_cost_usd is not None:
+                            tracker.max_cost_usd = item.max_cost_usd
+
                     trajectory = await loop.run(
                         task=item.task,
                         metadata=item.metadata,
@@ -300,6 +313,12 @@ class TaskManager:
                                     trajectory.error
                                     or f"Task failed with status: {trajectory.status}"
                                 ),
+                                result=trajectory.final_answer,
+                                prompt_tokens=trajectory.total_tokens.prompt_tokens,
+                                completion_tokens=trajectory.total_tokens.completion_tokens,
+                                total_tokens=trajectory.total_tokens.total_tokens,
+                                total_cost_usd=trajectory.total_cost_usd,
+                                duration_seconds=trajectory.total_duration_seconds,
                             )
 
                 logger.info(

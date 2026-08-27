@@ -15,6 +15,7 @@ class EventType(StrEnum):
     TOOL_OUTPUT = "tool_output"
     TASK_COMPLETE = "task_complete"
     ERROR = "error"
+    BUDGET_EXCEEDED = "budget_exceeded"
 
 
 class BaseEvent(BaseModel):
@@ -77,8 +78,26 @@ class ErrorEvent(BaseEvent):
     step: int | None = None
 
 
+class BudgetExceededEvent(BaseEvent):
+    """Emitted when a task exceeds its configured token or cost budget."""
+
+    event_type: Literal[EventType.BUDGET_EXCEEDED] = EventType.BUDGET_EXCEEDED
+    tokens_used: int
+    cost_usd: float
+    max_tokens: int | None = None
+    max_cost_usd: float | None = None
+    budget_type: str
+    partial_result: str | None = None
+    step: int | None = None
+
+
 AgentEvent = Annotated[
-    ThoughtEvent | ToolCallEvent | ToolOutputEvent | TaskCompleteEvent | ErrorEvent,
+    ThoughtEvent
+    | ToolCallEvent
+    | ToolOutputEvent
+    | TaskCompleteEvent
+    | ErrorEvent
+    | BudgetExceededEvent,
     Field(discriminator="event_type"),
 ]
 
@@ -89,6 +108,12 @@ class TaskSubmitRequest(BaseModel):
     task: str = Field(..., min_length=1, description="Task prompt to execute")
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Optional task metadata"
+    )
+    max_tokens: int | None = Field(
+        default=None, ge=1, description="Max total token budget"
+    )
+    max_cost_usd: float | None = Field(
+        default=None, ge=0.0, description="Max cost budget in USD"
     )
 
 
@@ -112,7 +137,12 @@ class TaskDetailResponse(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    tokens_used: int = 0
     total_cost_usd: float = 0.0
+    cost_usd: float = 0.0
+    max_tokens: int | None = None
+    max_cost_usd: float | None = None
+    budget_remaining_pct: float | None = None
     duration_seconds: float = 0.0
     created_at: datetime
     updated_at: datetime

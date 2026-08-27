@@ -64,6 +64,14 @@ class Task(Base):
         nullable=False,
         default=0.0,
     )
+    max_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    max_cost_usd: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
     duration_seconds: Mapped[float] = mapped_column(
         Float,
         nullable=False,

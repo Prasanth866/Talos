@@ -33,6 +33,8 @@ from src.agent.reflection import (
     parse_pytest_output,
 )
 from src.agent.state import AgentState, create_initial_agent_state
+from src.agent.token_tracker import format_partial_result
+from src.tools.exceptions import BudgetExceededError
 
 logger = structlog.get_logger(__name__)
 
@@ -165,7 +167,18 @@ class LangGraphAgent:
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
-        """Invokes LLM with async/sync compatibility."""
+        """Invokes LLM with async/sync compatibility and pre-call budget checks."""
+        tracker = getattr(self.llm_client, "token_tracker", None)
+        if tracker is not None:
+            is_exceeded, b_type, reason = tracker.is_budget_exceeded()
+            if is_exceeded:
+                raise BudgetExceededError(
+                    message=reason or "Task budget exceeded",
+                    budget_type=b_type or "tokens",
+                    tokens_used=tracker.cumulative_usage.total_tokens,
+                    cost_usd=tracker.cumulative_usage.estimated_cost_usd,
+                )
+
         res = self.llm_client.generate_response(messages, tools=tools)
         if asyncio.iscoroutine(res):
             return cast(LLMResponse, _run_coroutine_sync(res))
@@ -210,6 +223,18 @@ class LangGraphAgent:
                 "retry_count": 0,
                 "error": None,
                 "total_tokens": total_tokens,
+            }
+        except BudgetExceededError as exc:
+            partial_res = format_partial_result(
+                task=task,
+                plan=state.get("plan"),
+                tool_history=state.get("tool_history", []),
+                budget_reason=exc.message,
+            )
+            return {
+                "status": AgentStatus.FAILED.value,
+                "error": f"budget_exceeded: {exc.message}",
+                "partial_result": partial_res,
             }
         except (json.JSONDecodeError, ValidationError, Exception) as exc:
             new_retries = retry_count + 1
@@ -260,7 +285,20 @@ class LangGraphAgent:
         )
 
         tool_schemas = self.dispatcher.get_openai_tools_schema()
-        response = self._call_llm(messages, tools=tool_schemas)
+        try:
+            response = self._call_llm(messages, tools=tool_schemas)
+        except BudgetExceededError as exc:
+            partial_res = format_partial_result(
+                task=task,
+                plan=plan,
+                tool_history=tool_history,
+                budget_reason=exc.message,
+            )
+            return {
+                "status": AgentStatus.FAILED.value,
+                "error": f"budget_exceeded: {exc.message}",
+                "partial_result": partial_res,
+            }
         total_tokens = total_tokens + response.token_usage
 
         # Check if LLM produced final answer
@@ -496,13 +534,24 @@ class LangGraphAgent:
         task: str,
         workspace_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        max_cost_usd: float | None = None,
     ) -> AgentState:
-        """Runs a complete task synchronously with checkpointing."""
+        """Runs a complete task synchronously with checkpointing and budget tracking."""
+        tracker = getattr(self.llm_client, "token_tracker", None)
+        if tracker is not None:
+            if max_tokens is not None:
+                tracker.max_tokens = max_tokens
+            if max_cost_usd is not None:
+                tracker.max_cost_usd = max_cost_usd
+
         initial_state = create_initial_agent_state(
             task_id=task_id,
             task=task,
             workspace_id=workspace_id,
             metadata=metadata,
+            max_tokens=max_tokens,
+            max_cost_usd=max_cost_usd,
         )
         config = {"configurable": {"thread_id": task_id}}
         return cast(AgentState, self.graph.invoke(initial_state, config=config))

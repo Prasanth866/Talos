@@ -14,6 +14,8 @@ async def create_task(
     task_id: str,
     task: str,
     metadata: dict[str, Any] | None = None,
+    max_tokens: int | None = None,
+    max_cost_usd: float | None = None,
 ) -> Task:
     """Inserts a new task in PENDING state."""
     db_task = Task(
@@ -21,6 +23,8 @@ async def create_task(
         task=task,
         status=TaskStatus.PENDING.value,
         metadata_json=metadata or {},
+        max_tokens=max_tokens,
+        max_cost_usd=max_cost_usd,
     )
     session.add(db_task)
     await session.commit()
@@ -100,19 +104,39 @@ async def mark_completed(
     await session.commit()
 
 
-async def mark_failed(session: AsyncSession, task_id: str, error: str) -> None:
-    """Transitions a task to FAILED status with an error message."""
+async def mark_failed(
+    session: AsyncSession,
+    task_id: str,
+    error: str,
+    result: str | None = None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
+    total_cost_usd: float = 0.0,
+    duration_seconds: float = 0.0,
+) -> None:
+    """Transitions a task to FAILED status with error and optional partial result."""
     now = datetime.now(UTC)
-    stmt = (
-        update(Task)
-        .where(Task.id == task_id)
-        .values(
-            status=TaskStatus.FAILED.value,
-            error=error,
-            completed_at=now,
-            updated_at=now,
-        )
-    )
+    values: dict[str, Any] = {
+        "status": TaskStatus.FAILED.value,
+        "error": error,
+        "completed_at": now,
+        "updated_at": now,
+    }
+    if result is not None:
+        values["result"] = result
+    if prompt_tokens > 0:
+        values["prompt_tokens"] = prompt_tokens
+    if completion_tokens > 0:
+        values["completion_tokens"] = completion_tokens
+    if total_tokens > 0:
+        values["total_tokens"] = total_tokens
+    if total_cost_usd > 0.0:
+        values["total_cost_usd"] = total_cost_usd
+    if duration_seconds > 0.0:
+        values["duration_seconds"] = duration_seconds
+
+    stmt = update(Task).where(Task.id == task_id).values(**values)
     await session.execute(stmt)
     await session.commit()
 

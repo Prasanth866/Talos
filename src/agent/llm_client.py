@@ -161,6 +161,11 @@ class MockLLMClient(BaseLLMClient):
             raise item
 
         if isinstance(item, LLMResponse):
+            if item.token_usage:
+                self.token_tracker.record_usage(
+                    item.token_usage.prompt_tokens,
+                    item.token_usage.completion_tokens,
+                )
             return item
 
         prompt_len = sum(len(m.content) for m in messages)

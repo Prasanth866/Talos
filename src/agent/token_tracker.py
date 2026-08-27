@@ -49,11 +49,55 @@ class TokenTracker:
         self,
         model_name: str = "openai/gpt-oss-120b",
         custom_rates: CostRates | None = None,
+        max_tokens: int | None = None,
+        max_cost_usd: float | None = None,
     ) -> None:
         self.model_name = model_name
         self.rates = custom_rates or MODEL_PRICING.get(model_name, DEFAULT_COST_RATES)
+        self.max_tokens = max_tokens
+        self.max_cost_usd = max_cost_usd
         self.cumulative_usage = TokenUsage()
         self._history: list[TokenUsage] = []
+
+    def is_budget_exceeded(
+        self, projected_tokens: int = 0
+    ) -> tuple[bool, str | None, str | None]:
+        """Checks if current usage exceeds configured token or cost limits.
+
+        Returns (is_exceeded, budget_type, reason_message).
+        """
+        current_tokens = self.cumulative_usage.total_tokens + projected_tokens
+        if self.max_tokens is not None and current_tokens >= self.max_tokens:
+            reason = (
+                f"Token budget exceeded: {current_tokens}/{self.max_tokens} tokens used"
+            )
+            return True, "tokens", reason
+
+        current_cost = self.cumulative_usage.estimated_cost_usd
+        if self.max_cost_usd is not None and current_cost >= self.max_cost_usd:
+            reason = (
+                f"Cost budget exceeded: ${current_cost:.4f}/"
+                f"${self.max_cost_usd:.4f} spent"
+            )
+            return True, "cost", reason
+
+        return False, None, None
+
+    def budget_remaining_pct(self) -> float | None:
+        """Computes percentage of budget remaining (0.0 to 100.0)."""
+        pcts: list[float] = []
+        if self.max_tokens is not None and self.max_tokens > 0:
+            used_pct = (self.cumulative_usage.total_tokens / self.max_tokens) * 100.0
+            pcts.append(max(0.0, min(100.0, 100.0 - used_pct)))
+        if self.max_cost_usd is not None and self.max_cost_usd > 0.0:
+            used_pct = (
+                self.cumulative_usage.estimated_cost_usd / self.max_cost_usd
+            ) * 100.0
+            pcts.append(max(0.0, min(100.0, 100.0 - used_pct)))
+
+        if not pcts:
+            return None
+        return round(min(pcts), 2)
 
     def compute_usage(
         self,
@@ -122,5 +166,53 @@ class TokenTracker:
             "prompt_tokens": self.cumulative_usage.prompt_tokens,
             "completion_tokens": self.cumulative_usage.completion_tokens,
             "total_tokens": self.cumulative_usage.total_tokens,
+            "tokens_used": self.cumulative_usage.total_tokens,
             "total_cost_usd": round(self.cumulative_usage.estimated_cost_usd, 6),
+            "cost_usd": round(self.cumulative_usage.estimated_cost_usd, 6),
+            "max_tokens": self.max_tokens,
+            "max_cost_usd": self.max_cost_usd,
+            "budget_remaining_pct": self.budget_remaining_pct(),
         }
+
+
+def format_partial_result(
+    task: str,
+    plan: Any | None = None,
+    tool_history: list[Any] | None = None,
+    last_thought: str | None = None,
+    budget_reason: str | None = None,
+) -> str:
+    """Formats human-readable partial result string upon budget exhaustion."""
+    sections = ["=== PARTIAL RESULT (BUDGET EXCEEDED) ==="]
+    sections.append(f"Task: {task}")
+    if budget_reason:
+        sections.append(f"Reason: {budget_reason}")
+
+    if last_thought:
+        sections.append(f"\nLast Reasoning Thought:\n{last_thought}")
+
+    if plan is not None and hasattr(plan, "steps") and plan.steps:
+        completed = [s for s in plan.steps if getattr(s, "status", None) == "completed"]
+        pending = [s for s in plan.steps if getattr(s, "status", None) != "completed"]
+        sections.append(
+            f"\nPlan Progress: {len(completed)}/{len(plan.steps)} steps completed."
+        )
+        for s in completed:
+            desc = getattr(s, "description", "")
+            sid = getattr(s, "step_id", "?")
+            sections.append(f"  ✓ Step {sid}: {desc}")
+        for s in pending:
+            desc = getattr(s, "description", "")
+            sid = getattr(s, "step_id", "?")
+            sections.append(f"  ⏳ Step {sid}: {desc}")
+
+    if tool_history:
+        sections.append(f"\nTool Interactions Executed ({len(tool_history)}):")
+        for rec in tool_history[-5:]:  # show up to last 5
+            tool_name = getattr(rec, "tool_name", "tool")
+            step = getattr(rec, "step", "?")
+            success = getattr(rec, "success", True)
+            status_str = "SUCCESS" if success else "FAILED"
+            sections.append(f"  - Step {step} [{status_str}]: {tool_name}")
+
+    return "\n".join(sections)

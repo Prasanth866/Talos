@@ -44,6 +44,9 @@ class AgentState(TypedDict, total=False):
     test_result: Any
     workspace_id: str | None
     total_tokens: TokenUsage
+    max_tokens: int | None
+    max_cost_usd: float | None
+    partial_result: str | None
     metadata: dict[str, Any]
 
 
@@ -52,6 +55,8 @@ def create_initial_agent_state(
     task: str,
     workspace_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    max_tokens: int | None = None,
+    max_cost_usd: float | None = None,
 ) -> AgentState:
     """Initializes a new AgentState with clean default channels."""
     return {
@@ -71,5 +76,8 @@ def create_initial_agent_state(
         "test_result": None,
         "workspace_id": workspace_id,
         "total_tokens": TokenUsage(),
+        "max_tokens": max_tokens,
+        "max_cost_usd": max_cost_usd,
+        "partial_result": None,
         "metadata": dict(metadata or {}),
     }

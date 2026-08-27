@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import uuid4
 
@@ -23,20 +24,37 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 def _to_task_detail_response(task: Task) -> TaskDetailResponse:
+    pcts: list[float] = []
+    tot_tokens = task.total_tokens or 0
+    tot_cost = task.total_cost_usd or 0.0
+    if task.max_tokens is not None and task.max_tokens > 0:
+        used = (tot_tokens / task.max_tokens) * 100.0
+        pcts.append(max(0.0, min(100.0, 100.0 - used)))
+    if task.max_cost_usd is not None and task.max_cost_usd > 0.0:
+        used = (tot_cost / task.max_cost_usd) * 100.0
+        pcts.append(max(0.0, min(100.0, 100.0 - used)))
+    rem_pct = round(min(pcts), 2) if pcts else None
+
+    now = datetime.now(UTC)
     return TaskDetailResponse(
         task_id=task.id,
         task=task.task,
         status=TaskStatus(task.status),
         result=task.result,
         error=task.error,
-        metadata=task.metadata_json,
-        prompt_tokens=task.prompt_tokens,
-        completion_tokens=task.completion_tokens,
-        total_tokens=task.total_tokens,
-        total_cost_usd=task.total_cost_usd,
-        duration_seconds=task.duration_seconds,
-        created_at=task.created_at,
-        updated_at=task.updated_at,
+        metadata=task.metadata_json or {},
+        prompt_tokens=task.prompt_tokens or 0,
+        completion_tokens=task.completion_tokens or 0,
+        total_tokens=tot_tokens,
+        tokens_used=tot_tokens,
+        total_cost_usd=tot_cost,
+        cost_usd=tot_cost,
+        max_tokens=task.max_tokens,
+        max_cost_usd=task.max_cost_usd,
+        budget_remaining_pct=rem_pct,
+        duration_seconds=task.duration_seconds or 0.0,
+        created_at=task.created_at or now,
+        updated_at=task.updated_at or now,
         started_at=task.started_at,
         completed_at=task.completed_at,
     )
@@ -84,12 +102,16 @@ async def submit_task(
                     task_id=task_id,
                     task=request_body.task,
                     metadata=request_body.metadata,
+                    max_tokens=request_body.max_tokens,
+                    max_cost_usd=request_body.max_cost_usd,
                 )
 
         success = task_manager.submit(
             task_id=task_id,
             task=request_body.task,
             metadata=request_body.metadata,
+            max_tokens=request_body.max_tokens,
+            max_cost_usd=request_body.max_cost_usd,
         )
         if not success:
             logger.warning("task_submission_rejected_queue_full", task_id=task_id)

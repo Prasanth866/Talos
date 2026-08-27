@@ -159,3 +159,33 @@ class PatchError(ToolError):
         )
         self.reason = reason
         self.context = context
+
+
+class BudgetExceededError(ToolError):
+    """Raised when a task exceeds its configured token or cost budget."""
+
+    def __init__(
+        self,
+        message: str = "Task budget exceeded",
+        *,
+        tool_name: str = "token_tracker",
+        budget_type: str = "tokens",
+        tokens_used: int = 0,
+        cost_usd: float = 0.0,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        merged_details = {
+            "budget_type": budget_type,
+            "tokens_used": tokens_used,
+            "cost_usd": cost_usd,
+            **(details or {}),
+        }
+        super().__init__(
+            message,
+            tool_name=tool_name,
+            code="BUDGET_EXCEEDED",
+            details=merged_details,
+        )
+        self.budget_type = budget_type
+        self.tokens_used = tokens_used
+        self.cost_usd = cost_usd

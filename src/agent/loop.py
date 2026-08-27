@@ -16,8 +16,10 @@ from src.agent.models import (
     TrajectoryStatus,
 )
 from src.agent.prompts import build_system_prompt
+from src.agent.token_tracker import format_partial_result
 from src.api.schemas.events import (
     AgentEvent,
+    BudgetExceededEvent,
     ErrorEvent,
     TaskCompleteEvent,
     ThoughtEvent,
@@ -103,6 +105,35 @@ class ReasoningLoop:
 
         for step_num in range(1, self.max_steps + 1):
             step_start = time.perf_counter()
+
+            tracker = getattr(self.llm_client, "token_tracker", None)
+            if tracker is not None:
+                is_exceeded, b_type, reason = tracker.is_budget_exceeded()
+                if is_exceeded:
+                    duration = time.perf_counter() - start_time
+                    partial = format_partial_result(
+                        task=task,
+                        tool_history=trajectory.steps,
+                        budget_reason=reason,
+                    )
+                    trajectory.status = TrajectoryStatus.FAILED
+                    trajectory.error = f"budget_exceeded: {reason}"
+                    trajectory.final_answer = partial
+                    trajectory.total_duration_seconds = duration
+
+                    await _emit(
+                        BudgetExceededEvent(
+                            tokens_used=tracker.cumulative_usage.total_tokens,
+                            cost_usd=tracker.cumulative_usage.estimated_cost_usd,
+                            max_tokens=tracker.max_tokens,
+                            max_cost_usd=tracker.max_cost_usd,
+                            budget_type=b_type or "tokens",
+                            partial_result=partial,
+                            step=step_num,
+                            task_id=task_id,
+                        )
+                    )
+                    return trajectory
 
             try:
                 try:
