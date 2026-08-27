@@ -43,7 +43,6 @@ async def test_tool_dispatch_with_mocked_llm_returns_correct_tool_call() -> None
     assert len(trajectory.steps) == 2
     assert executed_args == [21]
 
-    # Check trajectory logs step 1
     step1 = trajectory.steps[0]
     assert step1.step_number == 1
     assert step1.thought == "I need to calculate double of 21."
@@ -53,7 +52,6 @@ async def test_tool_dispatch_with_mocked_llm_returns_correct_tool_call() -> None
     assert step1.tool_result.output == "42"
     assert step1.tool_result.success is True
 
-    # Check trajectory logs step 2
     step2 = trajectory.steps[1]
     assert step2.step_number == 2
     assert step2.thought == "The result is 42. Task complete."
@@ -65,7 +63,6 @@ async def test_reasoning_loop_max_steps_exceeded() -> None:
     dispatcher = ToolDispatcher()
     dispatcher.register_tool(name="ping", description="Ping", handler=lambda: "pong")
 
-    # Endless tool calls
     responses = [
         {
             "thought": f"Calling ping step {i}",
@@ -148,7 +145,7 @@ async def test_reasoning_loop_observation_truncation() -> None:
 
     assert trajectory.status == TrajectoryStatus.COMPLETED
     assert len(mock_llm.call_history) == 2
-    # Check that message sent to LLM for step 2 contains truncated observation
+
     second_call_messages = mock_llm.call_history[1]
     obs_message = second_call_messages[-1]
     assert "[truncated" in obs_message.content

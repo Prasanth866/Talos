@@ -74,11 +74,9 @@ def test_submit_task_returns_503_when_queue_full() -> None:
         patch("src.main.get_settings", return_value=settings),
         TestClient(app) as test_client,
     ):
-        # First task succeeds
         res1 = test_client.post("/tasks", json={"task": "Task 1"})
         assert res1.status_code == 202
 
-        # Second task rejected because queue is full (maxsize=1)
         res2 = test_client.post("/tasks", json={"task": "Task 2"})
         assert res2.status_code == 503
         assert res2.json() == {"detail": "Task queue is full"}
@@ -132,34 +130,29 @@ def test_websocket_streaming_flow(tmp_path: Path) -> None:
         task_id = post_resp.json()["task_id"]
 
         with test_client.websocket_connect(f"/ws?task_id={task_id}") as ws:
-            # Event 1: Thought from step 1
             msg1 = ws.receive_json()
             assert msg1["event_type"] == "thought"
             assert msg1["thought"] == "Need to list directory contents first."
             assert msg1["task_id"] == task_id
             assert msg1["version"] == "v1"
 
-            # Event 2: Tool Call from step 1
             msg2 = ws.receive_json()
             assert msg2["event_type"] == "tool_call"
             assert msg2["tool_name"] == "list_dir"
             assert msg2["task_id"] == task_id
             assert msg2["version"] == "v1"
 
-            # Event 3: Tool Output from step 1
             msg3 = ws.receive_json()
             assert msg3["event_type"] == "tool_output"
             assert msg3["tool_name"] == "list_dir"
             assert msg3["task_id"] == task_id
             assert msg3["success"] is True
 
-            # Event 4: Thought from step 2
             msg4 = ws.receive_json()
             assert msg4["event_type"] == "thought"
             assert msg4["thought"] == "Directory listed. Ready to conclude."
             assert msg4["task_id"] == task_id
 
-            # Event 5: Task Complete from step 2
             msg5 = ws.receive_json()
             assert msg5["event_type"] == "task_complete"
             assert msg5["final_answer"] == "Task completed successfully."
@@ -203,7 +196,7 @@ def test_websocket_disconnect_handling(tmp_path: Path) -> None:
             msg = ws.receive_json()
             assert msg["event_type"] == "thought"
             assert msg["task_id"] == task_id
-            # Client disconnects
+
             ws.close()
 
 
@@ -255,18 +248,16 @@ def test_websocket_concurrent_connections(tmp_path: Path) -> None:
 
 def test_get_default_loop_factory_branches() -> None:
     """Verifies get_default_loop_factory branches with and without api_key."""
-    # 1. With override
+
     mock_llm = MockLLMClient()
     loop1 = get_default_loop_factory(llm_client_override=mock_llm)
     assert loop1.llm_client is mock_llm
 
-    # 2. With api key configured
     custom_settings = Settings(llm_api_key=SecretStr("sk-test-key-123"))
     with patch("src.core.worker.get_settings", return_value=custom_settings):
         loop2 = get_default_loop_factory()
         assert loop2.llm_client.__class__.__name__ == "HTTPLLMClient"
 
-    # 3. Default without key
     no_key_settings = Settings(llm_api_key=SecretStr(""))
     with patch("src.core.worker.get_settings", return_value=no_key_settings):
         loop3 = get_default_loop_factory()

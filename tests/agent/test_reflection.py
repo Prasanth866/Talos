@@ -70,17 +70,17 @@ tests/test_models.py .....                                              [100%]
 
 def test_exponential_backoff_delays_increase_correctly() -> None:
     """Unit test: calculate_backoff_delay calculates 2^retry progression."""
-    # retry 0 -> 1.0s
+
     assert calculate_backoff_delay(0, base=1.0, factor=2.0) == 1.0
-    # retry 1 -> 2.0s
+
     assert calculate_backoff_delay(1, base=1.0, factor=2.0) == 2.0
-    # retry 2 -> 4.0s
+
     assert calculate_backoff_delay(2, base=1.0, factor=2.0) == 4.0
-    # retry 3 -> 8.0s
+
     assert calculate_backoff_delay(3, base=1.0, factor=2.0) == 8.0
-    # retry 4 -> 16.0s
+
     assert calculate_backoff_delay(4, base=1.0, factor=2.0) == 16.0
-    # Capped at max_delay
+
     assert calculate_backoff_delay(10, base=1.0, factor=2.0, max_delay=30.0) == 30.0
 
 
@@ -89,25 +89,21 @@ def test_circuit_breaker_opens_after_3_consecutive_errors() -> None:
     cb = CircuitBreaker(failure_threshold=3, name="test_breaker")
     assert not cb.is_open
 
-    # Failure 1
     tripped = cb.record_failure()
     assert not tripped
     assert cb.consecutive_failures == 1
     assert not cb.is_open
 
-    # Failure 2
     tripped = cb.record_failure()
     assert not tripped
     assert cb.consecutive_failures == 2
     assert not cb.is_open
 
-    # Failure 3 -> Trips
     tripped = cb.record_failure()
     assert tripped
     assert cb.consecutive_failures == 3
     assert cb.is_open
 
-    # Success resets breaker
     cb.record_success()
     assert cb.consecutive_failures == 0
     assert not cb.is_open
@@ -143,7 +139,6 @@ def test_retry_count_reaches_max_then_transitions_to_failed() -> None:
         }
     )
 
-    # Plan + 3 failed attempts
     mock_responses = [
         LLMResponse(raw_content=plan_json, thought="Plan created"),
         LLMResponse(
@@ -161,7 +156,6 @@ def test_retry_count_reaches_max_then_transitions_to_failed() -> None:
     ]
     llm = MockLLMClient(responses=mock_responses)
 
-    # Use circuit threshold of 5 so max_retries (3) triggers first
     cb = CircuitBreaker(failure_threshold=5)
     agent = LangGraphAgent(
         llm_client=llm,
@@ -223,7 +217,7 @@ def test_circuit_breaker_trips_agent_execution() -> None:
         llm_client=llm,
         dispatcher=dispatcher,
         circuit_breaker=cb,
-        max_retries=10,  # High max_retries so circuit breaker trips first
+        max_retries=10,
     )
 
     state = agent.run_task(task_id="circuit-task", task="Call crashing API")

@@ -8,6 +8,7 @@ from src.tools.exceptions import (
     PathTraversalError,
     ToolError,
 )
+from src.tools.security import SecretsScanner
 
 logger = structlog.get_logger(__name__)
 
@@ -20,7 +21,7 @@ class FileSystemTool:
         self.sandbox_dir.mkdir(parents=True, exist_ok=True)
 
     def _resolve_safe_path(self, relative_path: str | Path) -> Path:
-        """Resolves and verifies the target path is within the sandbox."""
+        """Resolves and verifies the target path is strictly within the sandbox."""
         clean_path_str = str(relative_path).strip()
         if not clean_path_str:
             raise ToolError(
@@ -29,9 +30,11 @@ class FileSystemTool:
                 details={"requested_path": str(relative_path)},
             )
 
-        # Normalize away leading slashes so Path / '/foo' doesn't escape to root
-        sanitized_rel = clean_path_str.lstrip("/\\")
-        target_path = (self.sandbox_dir / sanitized_rel).resolve()
+        candidate = Path(clean_path_str)
+        if candidate.is_absolute():
+            target_path = candidate.resolve()
+        else:
+            target_path = (self.sandbox_dir / candidate).resolve()
 
         if not target_path.is_relative_to(self.sandbox_dir):
             logger.warning(
@@ -117,7 +120,6 @@ class FileSystemTool:
 
         safe_path = self._resolve_safe_path(relative_path)
         try:
-            # Validate parent directory stays within sandbox BEFORE any mutation
             parent_resolved = safe_path.parent.resolve()
             if not parent_resolved.is_relative_to(self.sandbox_dir):
                 raise PathTraversalError(
@@ -129,7 +131,14 @@ class FileSystemTool:
                     attempted_path=str(safe_path),
                 )
             safe_path.parent.mkdir(parents=True, exist_ok=True)
-            safe_path.write_text(content, encoding="utf-8")
+            sanitized_content, threats = SecretsScanner.scan_and_redact(content)
+            if threats:
+                logger.warning(
+                    "filesystem.secrets_redacted_on_write",
+                    path=str(relative_path),
+                    threat_count=len(threats),
+                )
+            safe_path.write_text(sanitized_content, encoding="utf-8")
         except ToolError:
             raise
         except Exception as exc:
@@ -143,7 +152,6 @@ class FileSystemTool:
         """Writes raw binary content to a file inside the sandbox directory."""
         safe_path = self._resolve_safe_path(relative_path)
         try:
-            # Validate parent directory stays within sandbox BEFORE any mutation
             parent_resolved = safe_path.parent.resolve()
             if not parent_resolved.is_relative_to(self.sandbox_dir):
                 raise PathTraversalError(

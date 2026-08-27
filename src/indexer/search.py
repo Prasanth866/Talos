@@ -70,7 +70,6 @@ class HybridSearchEngine:
         if not chunks:
             return 0
 
-        # Generate embeddings in batch
         texts_to_embed = [c.embedding_text for c in chunks]
         embeddings = await self.embedding_client.embed_texts(texts_to_embed)
 

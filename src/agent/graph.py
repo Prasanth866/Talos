@@ -104,7 +104,6 @@ class LangGraphAgent:
         self.max_retries = max_retries
         self.max_steps = max_steps
 
-        # Setup SQLite checkpointer
         if checkpointer is not None:
             self.checkpointer = checkpointer
         elif db_path is not None:
@@ -126,7 +125,6 @@ class LangGraphAgent:
 
         builder.add_edge(START, "planning")
 
-        # Routing from planning node
         builder.add_conditional_edges(
             "planning",
             self._route_after_planning,
@@ -137,7 +135,6 @@ class LangGraphAgent:
             },
         )
 
-        # Routing from execution node
         builder.add_conditional_edges(
             "execution",
             self._route_after_execution,
@@ -149,7 +146,6 @@ class LangGraphAgent:
             },
         )
 
-        # Routing from reflection node
         builder.add_conditional_edges(
             "reflection",
             self._route_after_reflection,
@@ -184,9 +180,6 @@ class LangGraphAgent:
             return cast(LLMResponse, _run_coroutine_sync(res))
         return cast(LLMResponse, res)
 
-    # -------------------------------------------------------------------------
-    # GRAPH NODES
-    # -------------------------------------------------------------------------
     def _planning_node(self, state: AgentState) -> dict[str, Any]:
         """Generates structured Pydantic plan with retry on malformed output."""
         task = state.get("task", "")
@@ -274,7 +267,6 @@ class LangGraphAgent:
                 "error": f"Execution exceeded maximum step limit of {self.max_steps}",
             }
 
-        # Build context messages with sliding-window trimmed history
         messages = self.context_manager.build_context_messages(
             system_prompt=DEFAULT_AGENT_SYSTEM_PROMPT,
             task=task,
@@ -301,7 +293,6 @@ class LangGraphAgent:
             }
         total_tokens = total_tokens + response.token_usage
 
-        # Check if LLM produced final answer
         if response.final_answer and not response.tool_call:
             return {
                 "final_answer": response.final_answer,
@@ -310,14 +301,12 @@ class LangGraphAgent:
             }
 
         if not response.tool_call:
-            # If no tool call and no explicit final answer, treat thought as answer
             return {
                 "final_answer": response.thought,
                 "status": AgentStatus.COMPLETED.value,
                 "total_tokens": total_tokens,
             }
 
-        # Execute tool call
         tool_call = response.tool_call
         logger.info(
             "langgraph.tool_executing",
@@ -369,7 +358,6 @@ class LangGraphAgent:
 
         last_record = tool_history[-1]
 
-        # Check if output contains pytest summary info
         test_result = None
         output_lower = last_record.output.lower()
         if (
@@ -385,7 +373,6 @@ class LangGraphAgent:
         if test_result and not test_result.all_passed:
             is_step_success = False
 
-        # --- SUCCESS PATH ---
         if is_step_success:
             self.circuit_breaker.record_success()
 
@@ -412,11 +399,9 @@ class LangGraphAgent:
                 "status": AgentStatus.EXECUTING.value,
             }
 
-        # --- FAILURE PATH ---
         tripped = self.circuit_breaker.record_failure()
         consec_failures = self.circuit_breaker.consecutive_failures
 
-        # 1. Circuit Breaker tripped
         if tripped or self.circuit_breaker.is_open:
             logger.error(
                 "langgraph.circuit_breaker_tripped",
@@ -445,7 +430,6 @@ class LangGraphAgent:
                 "reflection_history": reflection_history,
             }
 
-        # 2. Bounded retries check
         new_retry = retry_count + 1
         if new_retry >= self.max_retries:
             logger.warning(
@@ -474,7 +458,6 @@ class LangGraphAgent:
                 "reflection_history": reflection_history,
             }
 
-        # 3. Exponential backoff and retry
         backoff_delay = calculate_backoff_delay(new_retry)
         logger.info(
             "langgraph.step_retry_scheduled",
@@ -498,9 +481,6 @@ class LangGraphAgent:
             "status": AgentStatus.EXECUTING.value,
         }
 
-    # -------------------------------------------------------------------------
-    # ROUTING CONDITIONS
-    # -------------------------------------------------------------------------
     def _route_after_planning(self, state: AgentState) -> str:
         status = state.get("status")
         if status == AgentStatus.FAILED.value:
@@ -525,9 +505,6 @@ class LangGraphAgent:
             return "failed"
         return "execution"
 
-    # -------------------------------------------------------------------------
-    # PUBLIC API
-    # -------------------------------------------------------------------------
     def run_task(
         self,
         task_id: str,

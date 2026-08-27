@@ -22,7 +22,6 @@ async def test_semantic_search_returns_relevant_results() -> None:
     fixture_dir = Path("tests/fixtures/sample_repo")
     await engine.index_directory(fixture_dir)
 
-    # Search with natural language query
     results = await engine.search_semantic(
         "function that asynchronously fetches data from remote endpoint",
         top_k=3,
@@ -45,19 +44,16 @@ async def test_hybrid_search_prefers_exact_match_over_semantic() -> None:
     fixture_dir = Path("tests/fixtures/sample_repo")
     await engine.index_directory(fixture_dir)
 
-    # 1. Exact query for 'Calculator'
     exact_results = await engine.search_hybrid("Calculator", top_k=5)
     assert len(exact_results) > 0
     assert exact_results[0].chunk.symbol_name == "Calculator"
     assert exact_results[0].score >= 1.0
 
-    # 2. Exact query for 'add'
     add_results = await engine.search_hybrid("add", top_k=5)
     assert len(add_results) > 0
     assert add_results[0].chunk.symbol_name == "add"
     assert add_results[0].score >= 1.0
 
-    # 3. Descriptive natural language query falls back to semantic
     desc_results = await engine.search_hybrid(
         "multiplies two floating point numbers", top_k=5
     )
@@ -85,7 +81,6 @@ async def test_live_project_hybrid_and_semantic_experiment() -> None:
         f"{index_duration:.4f}s"
     )
 
-    # 1. Query: exact symbol
     t_start = time.perf_counter()
     exact_res = await engine.search_hybrid("WorkspaceManager", top_k=5)
     exact_latency_ms = (time.perf_counter() - t_start) * 1000.0
@@ -97,7 +92,6 @@ async def test_live_project_hybrid_and_semantic_experiment() -> None:
         f"{exact_latency_ms:.2f}ms -> Top: {exact_res[0].chunk.symbol_name}"
     )
 
-    # 2. Query: natural language semantic description
     t_start = time.perf_counter()
     sem_res = await engine.search_hybrid(
         "asynchronously execute command inside docker container and stream lines",

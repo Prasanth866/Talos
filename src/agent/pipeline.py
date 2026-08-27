@@ -34,7 +34,6 @@ def create_workspace_dispatcher(
     dispatcher = ToolDispatcher()
     fs_tool = FileSystemTool(workspace_path)
 
-    # 1. Register Filesystem Tools (constrained to workspace)
     async def _read_file(path: str) -> str:
         return str(fs_tool.read_file(path))
 
@@ -100,7 +99,6 @@ def create_workspace_dispatcher(
         },
     )
 
-    # 2. Register Docker Sandbox Shell Tool
     async def _run_shell(command: str, timeout_s: float = 30.0) -> str:
         output_lines: list[str] = []
         is_timeout = False
@@ -147,7 +145,6 @@ def create_workspace_dispatcher(
         },
     )
 
-    # 3. Setup AST Indexer & Vector Store for Workspace
     indexer = CodeIndexer()
     client = embedding_client or create_default_embedding_client()
 
@@ -164,7 +161,6 @@ def create_workspace_dispatcher(
         chunker=chunker,
     )
 
-    # 4. Register Structural & Semantic Search Tools
     async def _get_symbol_definition(name: str) -> str:
         indexer.index_directory(workspace_path)
         symbols = indexer.get_symbol_definition(name)
@@ -371,7 +367,6 @@ async def execute_workspace_task(
             database_session_factory=database_session_factory,
         )
 
-        # Index codebase upfront
         await search_engine.index_directory(workspace_path)
 
         loop = ReasoningLoop(

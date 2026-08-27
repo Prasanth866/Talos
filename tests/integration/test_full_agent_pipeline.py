@@ -66,11 +66,10 @@ async def test_full_agent_pipeline_e2e(tmp_path: Path) -> None:
 
     agent navigates via search -> pytest runs in sandbox -> result returned.
     """
-    # 1. Setup fixture repository
+
     repo_source = tmp_path / "source_repo"
     repo_url = _create_fixture_git_repo(repo_source)
 
-    # 2. Check Docker availability
     try:
         docker_client = docker.from_env()
         docker_client.ping()
@@ -83,10 +82,8 @@ async def test_full_agent_pipeline_e2e(tmp_path: Path) -> None:
         workspace_root=workspace_root,
     )
 
-    # 3. Setup LLM client with scripted reasoning trajectory
     llm_client = MockLLMClient(
         responses=[
-            # Step 1: Semantic / Hybrid Search for the bug
             {
                 "thought": "I will search the codebase for division.",
                 "tool_call": {
@@ -94,7 +91,6 @@ async def test_full_agent_pipeline_e2e(tmp_path: Path) -> None:
                     "arguments": {"query": "divide"},
                 },
             },
-            # Step 2: Get symbol definition
             {
                 "thought": "Let me inspect the definition of divide.",
                 "tool_call": {
@@ -102,7 +98,6 @@ async def test_full_agent_pipeline_e2e(tmp_path: Path) -> None:
                     "arguments": {"name": "divide"},
                 },
             },
-            # Step 3: Fix the bug
             {
                 "thought": "Found multiplication bug. Fixing calculator.py.",
                 "tool_call": {
@@ -118,7 +113,6 @@ async def test_full_agent_pipeline_e2e(tmp_path: Path) -> None:
                     },
                 },
             },
-            # Step 4: Run pytest in sandbox
             {
                 "thought": "Running tests in the sandbox container.",
                 "tool_call": {
@@ -128,7 +122,6 @@ async def test_full_agent_pipeline_e2e(tmp_path: Path) -> None:
                     },
                 },
             },
-            # Step 5: Final completion
             {
                 "thought": "Tests passed successfully.",
                 "final_answer": "Fixed the division bug in calculator.py.",
@@ -138,7 +131,6 @@ async def test_full_agent_pipeline_e2e(tmp_path: Path) -> None:
 
     embedding_client = MockEmbeddingClient()
 
-    # 4. Execute Full Pipeline
     trajectory, workspace_id = await execute_workspace_task(
         task="Fix the bug in divide() so test_calculator.py passes",
         repo_url=repo_url,
@@ -148,13 +140,11 @@ async def test_full_agent_pipeline_e2e(tmp_path: Path) -> None:
         max_steps=10,
     )
 
-    # 5. Verify Trajectory & Results
     assert trajectory.status == TrajectoryStatus.COMPLETED
     assert trajectory.final_answer is not None
     assert "Fixed the division bug" in trajectory.final_answer
     assert len(trajectory.steps) == 5
 
-    # Verify tool calls executed in correct sequence
     step1 = trajectory.steps[0]
     assert step1.tool_call is not None
     assert step1.tool_call.tool_name == "hybrid_search"
@@ -175,6 +165,5 @@ async def test_full_agent_pipeline_e2e(tmp_path: Path) -> None:
     assert step4.tool_call is not None
     assert step4.tool_call.tool_name == "run_shell"
 
-    # Verify sandbox cleanup
     with pytest.raises(WorkspaceNotFoundError):
         mgr.get(workspace_id)

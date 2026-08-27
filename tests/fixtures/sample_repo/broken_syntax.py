@@ -4,7 +4,7 @@ def valid_function_before(x: int) -> int:
     """This function is valid and defined before the syntax error."""
     return x * 2
 
-# Intentional syntax error (missing colon on if statement)
+                                                          
 if True
     x = 100
 

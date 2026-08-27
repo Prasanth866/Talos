@@ -56,12 +56,10 @@ def test_security_network_escape_fails(
     manager, ws_id = hardened_workspace
 
     try:
-        # 1. Test curl outbound egress to 8.8.8.8
         curl_cmd = "curl -m 2 https://8.8.8.8 2>&1 || true"
         curl_res = manager.run_command(ws_id, ["/bin/sh", "-c", curl_cmd])
         print(f"\n[SECURITY TEST] Curl output: {curl_res['stdout']}")
 
-        # 2. Test raw Python socket connection to 8.8.8.8:53
         socket_cmd = (
             'python3 -c "import socket; s = socket.socket(); s.settimeout(2); '
             "s.connect(('8.8.8.8', 53))\" 2>&1 || true"
@@ -91,12 +89,10 @@ def test_security_filesystem_escape_fails(
     manager, ws_id = hardened_workspace
 
     try:
-        # Attempt to write persistent backdoor into /etc/crontab
         fs_cmd = "python3 -c \"open('/etc/crontab', 'w').write('evil')\" 2>&1 || true"
         fs_res = manager.run_command(ws_id, ["/bin/sh", "-c", fs_cmd])
         print(f"\n[SECURITY TEST] /etc/crontab write output: {fs_res['stdout']}")
 
-        # Attempt to modify root binary directory /bin/sh
         bin_cmd = "touch /bin/evil_binary 2>&1 || true"
         bin_res = manager.run_command(ws_id, ["/bin/sh", "-c", bin_cmd])
         print(f"[SECURITY TEST] /bin write output: {bin_res['stdout']}")
@@ -121,7 +117,6 @@ def test_security_fork_bomb_killed_within_5_seconds(
     manager, ws_id = hardened_workspace
 
     try:
-        # Spawn 2^10 = 1024 processes inside container
         fork_cmd = (
             'python3 -c "import os, time; [os.fork() for _ in range(10)]" 2>&1 || true'
         )
@@ -132,7 +127,6 @@ def test_security_fork_bomb_killed_within_5_seconds(
         print(f"\n[SECURITY TEST] Fork bomb execution time: {elapsed_seconds:.4f}s")
         print(f"[SECURITY TEST] Fork bomb output: {str(fork_res['stdout'])[:150]}")
 
-        # Must be blocked and return in well under 5 seconds (typically < 100ms)
         assert elapsed_seconds < 5.0
         assert (
             "BlockingIOError" in str(fork_res["stdout"])
@@ -140,7 +134,6 @@ def test_security_fork_bomb_killed_within_5_seconds(
             or "Errno 11" in str(fork_res["stdout"])
         )
 
-        # Ensure container and host are responsive and unharmed once reaper cleans up
         ping_res = None
         for _ in range(10):
             try:
@@ -164,7 +157,6 @@ def test_security_memory_exhaustion_contained_to_container(
     manager, ws_id = hardened_workspace
 
     try:
-        # Attempt to allocate 1GB in a 512MB capped container
         mem_cmd = "python3 -c \"a = b'x' * (1024 * 1024 * 1024)\" 2>&1 || true"
         mem_res = manager.run_command(ws_id, ["/bin/sh", "-c", mem_cmd])
         print(f"\n[SECURITY TEST] 1GB Memory allocation output: {mem_res['stdout']}")
@@ -175,7 +167,6 @@ def test_security_memory_exhaustion_contained_to_container(
             or str(mem_res["stdout"]) == ""
         )
 
-        # Verify container survives OOM-kill of child task and remains operational
         healthy_res = manager.run_command(ws_id, "echo 'container_alive'")
         assert healthy_res["stdout"] == "container_alive"
 
@@ -192,7 +183,6 @@ async def test_security_path_traversal_returns_tool_error(
     sandbox_dir.mkdir()
     (sandbox_dir / "valid_file.txt").write_text("safe content", encoding="utf-8")
 
-    # 1. Direct FileSystemTool path traversal check
     fs_tool = FileSystemTool(sandbox_dir=sandbox_dir)
     with pytest.raises(PathTraversalError) as exc_info:
         fs_tool.read_file("../../etc/passwd")
@@ -201,11 +191,9 @@ async def test_security_path_traversal_returns_tool_error(
     assert "Access denied" in str(exc_info.value)
     assert exc_info.value.tool_name == "FileSystemTool"
 
-    # Direct write path traversal check
     with pytest.raises(PathTraversalError):
         fs_tool.write_file("../../etc/shadow", "malicious_payload")
 
-    # 2. Agent ToolDispatcher path traversal check
     dispatcher = create_default_dispatcher(sandbox_dir)
     traversal_call = ToolCall(
         tool_name="read_file",

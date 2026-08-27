@@ -43,7 +43,6 @@ def test_e2e_submit_websocket_stream_and_db_record(tmp_path: Path) -> None:
     app.state.reasoning_loop_factory = custom_loop_factory
 
     with TestClient(app) as client:
-        # 1. Submit task via POST /tasks
         submit_res = client.post(
             "/tasks",
             json={
@@ -57,7 +56,6 @@ def test_e2e_submit_websocket_stream_and_db_record(tmp_path: Path) -> None:
         assert submit_data["status"] == "PENDING"
         assert submit_data["ws_url"] == f"/ws?task_id={task_id}"
 
-        # 2. Connect to WebSocket endpoint and collect streamed events
         events: list[dict[str, object]] = []
         with client.websocket_connect(f"/ws?task_id={task_id}") as ws:
             while True:
@@ -69,36 +67,30 @@ def test_e2e_submit_websocket_stream_and_db_record(tmp_path: Path) -> None:
                 except Exception:
                     break
 
-        # 3. Assert event sequence and schema
         assert len(events) >= 5, f"Expected at least 5 events, got {len(events)}"
 
-        # Event 1: Thought from step 1
         assert events[0]["event_type"] == "thought"
         assert events[0]["thought"] == "First let's check directory structure."
         assert events[0]["step"] == 1
         assert events[0]["task_id"] == task_id
         assert events[0]["version"] == "v1"
 
-        # Event 2: Tool Call from step 1
         assert events[1]["event_type"] == "tool_call"
         assert events[1]["tool_name"] == "list_dir"
         assert events[1]["step"] == 1
         assert events[1]["task_id"] == task_id
 
-        # Event 3: Tool Output from step 1
         assert events[2]["event_type"] == "tool_output"
         assert events[2]["tool_name"] == "list_dir"
         assert events[2]["success"] is True
         assert events[2]["step"] == 1
         assert events[2]["task_id"] == task_id
 
-        # Event 4: Thought from step 2
         assert events[3]["event_type"] == "thought"
         assert events[3]["thought"] == "Directory inspected. Ready to finish."
         assert events[3]["step"] == 2
         assert events[3]["task_id"] == task_id
 
-        # Event 5: Task Complete
         assert events[4]["event_type"] == "task_complete"
         assert (
             events[4]["final_answer"]
@@ -109,7 +101,6 @@ def test_e2e_submit_websocket_stream_and_db_record(tmp_path: Path) -> None:
         assert float(str(events[4]["total_cost_usd"])) > 0.0
         assert float(str(events[4]["duration_seconds"])) > 0.0
 
-        # 4. Verify DB record via GET /tasks/{task_id}
         db_task: dict[str, object] | None = None
         for _ in range(50):
             get_res = client.get(f"/tasks/{task_id}")
@@ -166,7 +157,6 @@ def test_token_cost_persisted_matches_trajectory(tmp_path: Path) -> None:
         assert submit_res.status_code == 202
         task_id = submit_res.json()["task_id"]
 
-        # Stream WebSocket to capture task_complete event
         complete_event: dict[str, object] | None = None
         with client.websocket_connect(f"/ws?task_id={task_id}") as ws:
             while True:
@@ -180,7 +170,6 @@ def test_token_cost_persisted_matches_trajectory(tmp_path: Path) -> None:
 
         assert complete_event is not None
 
-        # Fetch DB record
         get_res = client.get(f"/tasks/{task_id}")
         assert get_res.status_code == 200
         db_task = get_res.json()
@@ -224,14 +213,12 @@ def test_websocket_replays_events_on_late_connect(tmp_path: Path) -> None:
         assert submit_res.status_code == 202
         task_id = submit_res.json()["task_id"]
 
-        # Wait until task completes in worker pool
         for _ in range(50):
             res = client.get(f"/tasks/{task_id}")
             if res.json().get("status") == "COMPLETED":
                 break
             time.sleep(0.05)
 
-        # Late connect to WebSocket
         replayed_events: list[dict[str, object]] = []
         with client.websocket_connect(f"/ws?task_id={task_id}") as ws:
             while True:
@@ -272,7 +259,6 @@ def test_failed_task_streams_error_and_persists_failure(tmp_path: Path) -> None:
         assert submit_res.status_code == 202
         task_id = submit_res.json()["task_id"]
 
-        # Stream WebSocket
         error_event: dict[str, object] | None = None
         with client.websocket_connect(f"/ws?task_id={task_id}") as ws:
             while True:
@@ -287,7 +273,6 @@ def test_failed_task_streams_error_and_persists_failure(tmp_path: Path) -> None:
         assert error_event is not None
         assert "Simulated LLM network failure" in str(error_event["error"])
 
-        # Fetch DB record
         db_task: dict[str, object] | None = None
         for _ in range(50):
             res = client.get(f"/tasks/{task_id}")

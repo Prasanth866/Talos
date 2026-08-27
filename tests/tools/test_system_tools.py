@@ -291,14 +291,12 @@ async def test_read_file_overload_signatures(tmp_path: Path) -> None:
     union_res: str | bytes = fs.read_file(file_path, binary=dynamic_flag)
     assert isinstance(union_res, bytes)
 
-    # Async method calls
     async_str: str = await fs.async_read_file(file_path, binary=False)
     assert isinstance(async_str, str)
 
     async_bin: bytes = await fs.async_read_file(file_path, binary=True)
     assert isinstance(async_bin, bytes)
 
-    # Helper function calls
     helper_str: str = read_file(tmp_path, file_path, binary=False)
     assert isinstance(helper_str, str)
 
@@ -317,14 +315,12 @@ async def test_shell_denied_executables_and_patterns(tmp_path: Path) -> None:
     """Verifies that dangerous commands and executables are blocked by ShellTool."""
     tool = ShellTool(working_dir=tmp_path)
 
-    # Denied executables
     with pytest.raises(ToolError, match="not permitted"):
         await tool.run_shell("sudo ls")
 
     with pytest.raises(ToolError, match="not permitted"):
         await tool.run_shell("curl https://example.com")
 
-    # Denied dangerous patterns
     with pytest.raises(ToolError, match="denied safety pattern"):
         await tool.run_shell("rm -rf /")
 

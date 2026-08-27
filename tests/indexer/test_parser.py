@@ -24,7 +24,6 @@ def calculate_total(price: float, tax_rate: float = 0.05, *items, **metadata) ->
     assert fn.line_span.end_line == 4
     assert not fn.is_async
 
-    # Verify arguments
     arg_names = [a.name for a in fn.args]
     assert "price" in arg_names
     assert "tax_rate" in arg_names
@@ -35,7 +34,6 @@ def calculate_total(price: float, tax_rate: float = 0.05, *items, **metadata) ->
     assert tax_arg.type_annotation == "float"
     assert tax_arg.default_value == "0.05"
 
-    # Verify symbol index
     assert "calculate_total" in structure.symbols
     sym = structure.symbols["calculate_total"]
     assert sym.kind == SymbolKind.FUNCTION
@@ -73,7 +71,6 @@ class UserService(BaseService, AuthMixin):
     assert method.return_type == "Optional[User]"
     assert method.docstring == "Fetches a user by primary key ID."
 
-    # Verify symbol dictionary includes qualified method name
     assert "UserService" in structure.symbols
     assert "UserService.get_user_by_id" in structure.symbols
     assert structure.symbols["UserService.get_user_by_id"].kind == SymbolKind.METHOD

@@ -46,7 +46,7 @@ async def test_submit_returns_false_when_queue_full() -> None:
 
     assert tm.submit(str(uuid4()), "Task 1") is True
     assert tm.submit(str(uuid4()), "Task 2") is True
-    # Queue is now at capacity (2/2)
+
     assert tm.submit(str(uuid4()), "Task 3") is False
 
 
@@ -90,12 +90,11 @@ async def test_worker_processes_task_and_broadcasts_events() -> None:
         while True:
             evt = await sub_queue.get()
             received_events.append(evt)
-            if evt is None:  # Sentinel indicating task completed
+            if evt is None:
                 break
 
         await tm.stop()
 
-    # Filter non-None events
     events = [e for e in received_events if e is not None]
     assert len(events) >= 2
     assert isinstance(events[0], ThoughtEvent)
@@ -158,7 +157,7 @@ async def test_graceful_shutdown_drains_inflight_tasks() -> None:
             messages: list[Any],
             tools: list[dict[str, Any]] | None = None,
         ) -> Any:
-            await asyncio.sleep(0.05)  # Simulate in-flight work
+            await asyncio.sleep(0.05)
             cv = structlog.contextvars.get_contextvars()
             completed_tasks.append(cv.get("task_id", ""))
             return await super().generate_response(messages, tools=tools)
@@ -227,18 +226,15 @@ async def test_task_events_bounded_retention() -> None:
     evt2 = ThoughtEvent(thought="Thought 2", step=1, task_id=t2)
     evt3 = ThoughtEvent(thought="Thought 3", step=1, task_id=t3)
 
-    # Broadcast events for t1 and complete t1
     await tm.broadcast_event(t1, evt1)
     await tm.broadcast_event(t1, None)
 
-    # Broadcast events for t2 and complete t2
     await tm.broadcast_event(t2, evt2)
     await tm.broadcast_event(t2, None)
 
     assert t1 in tm._task_events
     assert t2 in tm._task_events
 
-    # Broadcast events for t3 and complete t3 (should evict t1 since limit is 2)
     await tm.broadcast_event(t3, evt3)
     await tm.broadcast_event(t3, None)
 

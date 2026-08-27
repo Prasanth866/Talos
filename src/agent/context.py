@@ -53,14 +53,12 @@ class ContextManager:
         if not tool_history:
             return []
 
-        # If already within budget and length, return copies
         if (
             len(tool_history) <= recent_limit
             and self.estimate_tool_history_tokens(tool_history) <= token_limit
         ):
             return list(tool_history)
 
-        # Partition into older history vs recent window
         split_idx = max(0, len(tool_history) - recent_limit)
         older_records = tool_history[:split_idx]
         recent_records = tool_history[split_idx:]
@@ -84,7 +82,6 @@ class ContextManager:
 
         trimmed = compacted_older + list(recent_records)
 
-        # Secondary check: if still over token limit, further truncate older outputs
         current_tokens = self.estimate_tool_history_tokens(trimmed)
         if current_tokens > token_limit and compacted_older:
             reduced_older: list[ToolExecutionRecord] = []
@@ -123,7 +120,10 @@ class ContextManager:
         return "\n".join(lines)
 
     def format_history_section(self, tool_history: list[ToolExecutionRecord]) -> str:
-        """Formats trimmed tool history into a clear trajectory block."""
+        """Formats trimmed tool history into a clear trajectory block.
+
+        Wraps each tool output in untrusted_observation tags for prompt isolation.
+        """
         if not tool_history:
             return "No previous actions taken."
 
@@ -132,7 +132,12 @@ class ContextManager:
         for r in trimmed:
             status_str = "SUCCESS" if r.success else "FAILED"
             lines.append(f"\n[Step {r.step}] Action: {r.tool_name}({r.arguments})")
-            lines.append(f"  Result ({status_str}): {r.output}")
+            lines.append(
+                f"  Result ({status_str}):\n"
+                f'<untrusted_observation source="{r.tool_name}" step="{r.step}">\n'
+                f"{r.output}\n"
+                f"</untrusted_observation>"
+            )
         return "\n".join(lines)
 
     def build_context_messages(

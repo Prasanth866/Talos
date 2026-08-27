@@ -14,7 +14,6 @@ async def test_real_failing_test_task_end_to_end(tmp_path: Path) -> None:
     sandbox_dir = tmp_path / "sandbox"
     sandbox_dir.mkdir()
 
-    # Create buggy code and failing test inside the sandbox
     buggy_code = (
         "def calculate_average(numbers: list[float]) -> float:\n"
         "    if not numbers:\n"
@@ -41,9 +40,7 @@ async def test_real_failing_test_task_end_to_end(tmp_path: Path) -> None:
         "    return sum(numbers) / len(numbers)\n"
     )
 
-    # Simulated intelligent agent sequence
     mock_responses: list[dict[str, Any]] = [
-        # Step 1: Run pytest to see the failure
         {
             "thought": "First, I need to run pytest to observe what test is failing.",
             "tool_call": {
@@ -51,7 +48,6 @@ async def test_real_failing_test_task_end_to_end(tmp_path: Path) -> None:
                 "arguments": {"command": "pytest test_stats.py"},
             },
         },
-        # Step 2: Read stats.py to inspect the implementation
         {
             "thought": "Test failed with ZeroDivisionError. Let's inspect stats.py.",
             "tool_call": {
@@ -59,7 +55,6 @@ async def test_real_failing_test_task_end_to_end(tmp_path: Path) -> None:
                 "arguments": {"path": "stats.py"},
             },
         },
-        # Step 3: Write the fixed code to stats.py
         {
             "thought": "Bug found: divisor is len(numbers) - 1. Writing fix.",
             "tool_call": {
@@ -70,7 +65,6 @@ async def test_real_failing_test_task_end_to_end(tmp_path: Path) -> None:
                 },
             },
         },
-        # Step 4: Run pytest again to verify the fix
         {
             "thought": "Now let's verify that the tests pass with pytest.",
             "tool_call": {
@@ -78,7 +72,6 @@ async def test_real_failing_test_task_end_to_end(tmp_path: Path) -> None:
                 "arguments": {"command": "pytest test_stats.py"},
             },
         },
-        # Step 5: Final answer
         {
             "thought": "All tests pass. The bug in calculate_average is resolved.",
             "final_answer": (
@@ -96,7 +89,6 @@ async def test_real_failing_test_task_end_to_end(tmp_path: Path) -> None:
     )
     trajectory = await runner.run(task_description)
 
-    # Assertions on trajectory
     assert trajectory.status == TrajectoryStatus.COMPLETED
     assert trajectory.final_answer is not None
     assert "Fixed calculate_average" in trajectory.final_answer
@@ -105,7 +97,6 @@ async def test_real_failing_test_task_end_to_end(tmp_path: Path) -> None:
     assert trajectory.total_tokens.total_tokens > 0
     assert trajectory.total_cost_usd > 0.0
 
-    # Step 1: run_shell failed as expected
     step1 = trajectory.steps[0]
     assert step1.tool_call is not None
     assert step1.tool_call.tool_name == "run_shell"
@@ -116,14 +107,12 @@ async def test_real_failing_test_task_end_to_end(tmp_path: Path) -> None:
         or "Error" in step1.tool_result.formatted_content
     )
 
-    # Step 3: write_file
     step3 = trajectory.steps[2]
     assert step3.tool_call is not None
     assert step3.tool_call.tool_name == "write_file"
     assert step3.tool_result is not None
     assert step3.tool_result.success is True
 
-    # Step 4: run_shell passed
     step4 = trajectory.steps[3]
     assert step4.tool_call is not None
     assert step4.tool_call.tool_name == "run_shell"
@@ -131,6 +120,5 @@ async def test_real_failing_test_task_end_to_end(tmp_path: Path) -> None:
     assert step4.tool_result.success is True
     assert "passed" in step4.tool_result.output
 
-    # Verify file content on disk
     updated_content = (sandbox_dir / "stats.py").read_text(encoding="utf-8")
     assert "return sum(numbers) / len(numbers)" in updated_content

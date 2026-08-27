@@ -132,6 +132,5 @@ async def test_list_tasks_and_filters(db_session: AsyncSession) -> None:
     assert len(failed_tasks) == 1
     assert failed_tasks[0].id == "task-3"
 
-    # Test limit and offset
     paginated = await repository.list_tasks(db_session, limit=2, offset=1)
     assert len(paginated) == 2

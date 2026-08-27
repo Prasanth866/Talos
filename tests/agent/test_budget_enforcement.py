@@ -48,7 +48,6 @@ async def test_budget_exceeded_triggers_budget_exceeded_event() -> None:
         custom_rates=CostRates(prompt_cost_per_1m=1.0, completion_cost_per_1m=2.0),
     )
 
-    # First response uses 120 tokens -> Exceeds 100 max_tokens
     resp1 = LLMResponse(
         thought="Starting work",
         tool_call=ToolCall(tool_name="do_work", arguments={}),
@@ -76,12 +75,10 @@ async def test_budget_exceeded_triggers_budget_exceeded_event() -> None:
         task_id="task-budget-1",
     )
 
-    # Trajectory must fail due to budget exceeded
     assert trajectory.status == TrajectoryStatus.FAILED
     assert "budget_exceeded" in (trajectory.error or "")
     assert "PARTIAL RESULT" in (trajectory.final_answer or "")
 
-    # BudgetExceededEvent must have been emitted
     budget_events = [e for e in events if e.event_type == EventType.BUDGET_EXCEEDED]
     assert len(budget_events) == 1
     bev = budget_events[0]
@@ -120,7 +117,6 @@ async def test_partial_result_written_to_db_on_budget_exhaustion(
         handler=lambda: "completed step 1",
     )
 
-    # Step 1 consumes 80 tokens (exceeding 50 limit)
     tracker = TokenTracker(max_tokens=50)
     resp1 = LLMResponse(
         thought="Executing step 1",
@@ -153,7 +149,6 @@ async def test_partial_result_written_to_db_on_budget_exhaustion(
         )
         await task_manager.stop()
 
-    # Verify DB persistence
     async with session_factory() as session:
         saved_task = await repository.get_task(session, task_id)
         assert saved_task is not None
@@ -171,7 +166,7 @@ async def test_pre_call_budget_check_prevents_initial_llm_call() -> None:
     """Unit test: When budget is already exhausted, 0 LLM calls are executed."""
     dispatcher = ToolDispatcher()
     token_tracker = TokenTracker(max_tokens=100)
-    # Pre-record 100 tokens consumed prior to call
+
     token_tracker.record_usage(prompt_tokens=60, completion_tokens=40)
 
     mock_llm = MockLLMClient(
@@ -215,10 +210,9 @@ def test_task_status_api_shows_tokens_cost_and_budget_remaining_pct() -> None:
     assert detail.cost_usd == 0.002
     assert detail.max_tokens == 1000
     assert detail.max_cost_usd == 0.01
-    # 400/1000 tokens (60% rem); 0.002/0.01 cost (80% rem) -> min = 60.0%
+
     assert detail.budget_remaining_pct == 60.0
 
-    # Test exhausted budget (0.0% remaining)
     task_exhausted = Task(
         id="exhausted-task",
         task="Analyze performance",
@@ -251,7 +245,6 @@ def test_task_transitions_to_failed_with_reason_budget_exceeded_in_graph() -> No
         }
     )
 
-    # Tracker with max_tokens=100
     tracker = TokenTracker(max_tokens=100)
     mock_responses = [
         LLMResponse(

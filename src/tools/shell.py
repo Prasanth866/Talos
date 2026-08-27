@@ -9,15 +9,15 @@ from pathlib import Path
 
 from src.tools.exceptions import (
     CommandExecutionError,
+    DangerousCommandError,
     ExecutionTimeoutError,
     ToolError,
 )
+from src.tools.security import SecretsScanner
 
 MAX_OUTPUT_CHARS = 4000
 
-# Commands that are too dangerous for an autonomous agent to execute.
-# This is a heuristic defense layer — production deployments should also
-# enforce OS-level isolation (containers, bubblewrap, nsjail).
+
 _DENIED_EXECUTABLES = frozenset(
     {
         "sudo",
@@ -52,14 +52,16 @@ _DENIED_EXECUTABLES = frozenset(
     }
 )
 
-# Shell patterns that indicate dangerous intent regardless of executable.
+
 _DENIED_PATTERNS = [
-    re.compile(r"rm\s+.*-.*r.*f", re.IGNORECASE),  # rm -rf / rm -fr
-    re.compile(r"rm\s+-rf\s+/", re.IGNORECASE),  # rm -rf /
-    re.compile(r">{1,2}\s*/dev/"),  # redirect to /dev/
-    re.compile(r"\|\s*(bash|sh|zsh|dash)"),  # pipe to shell
-    re.compile(r"mkfifo"),  # named pipes
-    re.compile(r"eval\s"),  # eval injection
+    re.compile(r"rm\s+.*-(?:[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)", re.IGNORECASE),
+    re.compile(r"rm\s+.*-r.*-f", re.IGNORECASE),
+    re.compile(r"rm\s+.*-f.*-r", re.IGNORECASE),
+    re.compile(r"rm\s+-rf\s+/", re.IGNORECASE),
+    re.compile(r">{1,2}\s*/dev/"),
+    re.compile(r"\|\s*(?:bash|sh|zsh|dash|ksh)\b", re.IGNORECASE),
+    re.compile(r"mkfifo\b", re.IGNORECASE),
+    re.compile(r"\beval\s", re.IGNORECASE),
 ]
 
 
@@ -78,20 +80,30 @@ class ShellTool:
         self.timeout_seconds = timeout_seconds
 
     @staticmethod
-    def _check_command_safety(command_str: str, executable: str) -> None:
-        """Raises ToolError if the command matches known dangerous patterns."""
+    def _is_denied_executable(name: str) -> bool:
+        if name in _DENIED_EXECUTABLES:
+            return True
+        return any(name.startswith(p) for p in ("mkfs", "fdisk", "mkswap", "fsck"))
+
+    @classmethod
+    def _check_command_safety(cls, command_str: str, executable: str) -> None:
+        """Raises DangerousCommandError if command matches safety blacklist."""
         exe_basename = Path(executable).name.lower()
-        if exe_basename in _DENIED_EXECUTABLES:
-            raise ToolError(
+        if cls._is_denied_executable(exe_basename):
+            raise DangerousCommandError(
                 message=f"Command '{exe_basename}' is not permitted.",
                 tool_name="ShellTool",
+                command=command_str,
+                blocked_pattern=exe_basename,
                 details={"executable": executable, "reason": "denied_executable"},
             )
         for pattern in _DENIED_PATTERNS:
             if pattern.search(command_str):
-                raise ToolError(
+                raise DangerousCommandError(
                     message="Command matches a denied safety pattern.",
                     tool_name="ShellTool",
+                    command=command_str,
+                    blocked_pattern=pattern.pattern,
                     details={
                         "command": command_str,
                         "pattern": pattern.pattern,
@@ -113,6 +125,7 @@ class ShellTool:
                     tool_name="ShellTool",
                     details={"command": command_or_executable},
                 )
+            self._check_command_safety(command_str, command_str.split()[0])
             if args is not None:
                 executable = command_str
                 cmd_args = list(args)
@@ -143,7 +156,6 @@ class ShellTool:
                 details={"executable": executable},
             )
 
-        # Validate command against denylist before execution
         cmd_string = f"{executable} {' '.join(cmd_args)}"
         self._check_command_safety(cmd_string, executable)
 
@@ -201,8 +213,10 @@ class ShellTool:
                 details={"executable": executable, "args": cmd_args},
             ) from exc
 
-        stdout = _truncate(stdout_bytes.decode("utf-8", errors="replace").strip())
-        stderr = _truncate(stderr_bytes.decode("utf-8", errors="replace").strip())
+        raw_stdout = _truncate(stdout_bytes.decode("utf-8", errors="replace").strip())
+        raw_stderr = _truncate(stderr_bytes.decode("utf-8", errors="replace").strip())
+        stdout, _ = SecretsScanner.scan_and_redact(raw_stdout)
+        stderr, _ = SecretsScanner.scan_and_redact(raw_stderr)
 
         if process is None:
             raise ToolError(

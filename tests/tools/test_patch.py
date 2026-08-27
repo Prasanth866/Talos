@@ -85,7 +85,6 @@ async def test_invalid_patch_returns_patch_error_without_modifying_files(
     assert exc_info.value.code == "PATCH_ERROR"
     assert exc_info.value.reason in ("CONTEXT_MISMATCH", "DELETION_MISMATCH")
 
-    # File on disk MUST remain untouched
     assert target_file.read_text(encoding="utf-8") == original_content
 
 
@@ -97,7 +96,6 @@ async def test_dry_run_validation_catches_conflicting_patches(
     original_content = "def start():\n    pass\n"
     target_file.write_text(original_content, encoding="utf-8")
 
-    # Valid dry run
     valid_patch = """--- a/server.py
 +++ b/server.py
 @@ -1,2 +1,3 @@
@@ -109,10 +107,9 @@ async def test_dry_run_validation_catches_conflicting_patches(
     dry_res = await tool.apply_patch(valid_patch, dry_run=True)
     assert dry_res["success"]
     assert dry_res["dry_run"]
-    # Disk remains untouched after dry run
+
     assert target_file.read_text(encoding="utf-8") == original_content
 
-    # Conflicting dry run raises PatchError
     conflict_patch = """--- a/server.py
 +++ b/server.py
 @@ -1,2 +1,2 @@
@@ -144,11 +141,9 @@ async def test_search_index_updated_after_patch_application(
     )
     await search_engine.index_directory(tmp_path)
 
-    # Initial index search should find old_calculate
     syms_before = indexer.get_symbol_definition("old_calculate")
     assert len(syms_before) == 1
 
-    # Apply patch replacing old_calculate with payment_processor
     patch_text = """--- a/service.py
 +++ b/service.py
 @@ -1,2 +1,3 @@
@@ -167,7 +162,6 @@ async def test_search_index_updated_after_patch_application(
     assert res["success"]
     assert "service.py" in res["reindexed_files"]
 
-    # Post-patch: AST index now has payment_processor and old_calculate is removed
     syms_after = indexer.get_symbol_definition("payment_processor")
     assert len(syms_after) == 1
     assert syms_after[0].name == "payment_processor"
@@ -175,7 +169,6 @@ async def test_search_index_updated_after_patch_application(
     old_syms = indexer.get_symbol_definition("old_calculate")
     assert len(old_syms) == 0
 
-    # Hybrid search now matches payment_processor
     search_results = await search_engine.search_hybrid("payment processor")
     assert len(search_results) > 0
     assert any("payment_processor" in r.chunk.symbol_name for r in search_results)
@@ -185,7 +178,6 @@ async def test_file_creation_and_deletion_via_patch(tmp_path: Path) -> None:
     """Unit test: Unified diff can create new files and delete existing files."""
     tool = PatchTool(sandbox_dir=tmp_path)
 
-    # 1. Create file
     create_patch = """--- /dev/null
 +++ b/new_module.py
 @@ -0,0 +1,2 @@
@@ -198,7 +190,6 @@ async def test_file_creation_and_deletion_via_patch(tmp_path: Path) -> None:
     assert new_file.exists()
     assert "def greet()" in new_file.read_text(encoding="utf-8")
 
-    # 2. Delete file
     delete_patch = """--- a/new_module.py
 +++ /dev/null
 @@ -1,2 +0,0 @@

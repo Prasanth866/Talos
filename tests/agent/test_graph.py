@@ -80,7 +80,6 @@ def test_context_window_trimming_keeps_history_within_limits() -> None:
     """Unit test: ContextManager compacts older history when 10+ calls occur."""
     ctx_mgr = ContextManager(max_recent_records=3, max_history_tokens=1000)
 
-    # Generate 12 tool execution records with long outputs
     records: list[ToolExecutionRecord] = []
     for i in range(1, 13):
         records.append(
@@ -97,16 +96,13 @@ def test_context_window_trimming_keeps_history_within_limits() -> None:
     trimmed = ctx_mgr.trim_tool_history(records, max_recent=3)
     assert len(trimmed) == 12
 
-    # Verify older records (first 9) were compacted into brief summaries
     for r in trimmed[:9]:
         assert len(r.output) < 250
         assert f"[Step {r.step}]" in r.output
 
-    # Verify recent records (last 3) retained their full verbose output
     for r in trimmed[9:]:
         assert len(r.output) > 500
 
-    # Verify token estimate was reduced significantly
     raw_tokens = ctx_mgr.estimate_tool_history_tokens(records)
     trimmed_tokens = ctx_mgr.estimate_tool_history_tokens(trimmed)
     assert trimmed_tokens < raw_tokens
@@ -116,7 +112,6 @@ def test_checkpoint_persistence_saves_and_restores_state(tmp_path: Path) -> None
     """Unit test: SQLite checkpointer saves and restores state across restarts."""
     db_file = tmp_path / "test_checkpoints.db"
 
-    # Setup dispatcher and mock LLM
     dispatcher = ToolDispatcher()
     plan_json = json.dumps(
         {
@@ -140,7 +135,6 @@ def test_checkpoint_persistence_saves_and_restores_state(tmp_path: Path) -> None
     ]
     llm = MockLLMClient(responses=mock_responses)
 
-    # 1. Run task on agent 1 with SQLite persistence
     agent1 = LangGraphAgent(
         llm_client=llm,
         dispatcher=dispatcher,
@@ -151,7 +145,6 @@ def test_checkpoint_persistence_saves_and_restores_state(tmp_path: Path) -> None
     assert final_state["final_answer"] == "Done!"
     assert final_state["plan"] is not None
 
-    # 2. Re-instantiate agent 2 connected to the same SQLite DB and verify saved state
     conn = sqlite3.connect(str(db_file), check_same_thread=False)
     checkpointer = SqliteSaver(conn)
     agent2 = LangGraphAgent(
@@ -173,7 +166,6 @@ def test_malformed_output_triggers_retry_up_to_max_then_failed_state() -> None:
     """Unit test: Malformed output triggers retry up to max_retries, then fails."""
     dispatcher = ToolDispatcher()
 
-    # Provide 3 consecutive malformed outputs
     mock_responses = [
         LLMResponse(raw_content="not valid json at all", thought="bad 1"),
         LLMResponse(raw_content="{'broken': json}", thought="bad 2"),
@@ -213,7 +205,6 @@ def test_malformed_output_recovers_on_subsequent_retry() -> None:
         }
     )
 
-    # First attempt malformed, second attempt valid plan, third attempt final answer
     mock_responses = [
         LLMResponse(raw_content="invalid json...", thought="bad attempt"),
         LLMResponse(raw_content=valid_plan_json, thought="corrected plan"),
@@ -264,14 +255,11 @@ def test_full_langgraph_task_execution_flow() -> None:
     )
 
     mock_responses = [
-        # 1. Plan node
         LLMResponse(raw_content=plan_json, thought="Plan created"),
-        # 2. Execution node -> tool call
         LLMResponse(
             thought="Calling echo tool",
             tool_call=ToolCall(tool_name="echo_tool", arguments={"msg": "hello"}),
         ),
-        # 3. Execution node -> final answer
         LLMResponse(
             thought="Observation received, task complete",
             final_answer="The echo returned 'Echo: hello'.",

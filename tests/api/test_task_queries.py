@@ -13,12 +13,11 @@ from src.main import app
 
 
 def test_task_query_crud_lifecycle(client: TestClient) -> None:
-    # 1. Test 404 for non-existent task
+
     resp_404 = client.get("/tasks/non-existent-uuid")
     assert resp_404.status_code == 404
     assert "not found" in resp_404.json()["detail"].lower()
 
-    # 2. Submit a new task
     submit_resp = client.post(
         "/tasks",
         json={"task": "Calculate total repository files", "metadata": {"env": "test"}},
@@ -28,7 +27,6 @@ def test_task_query_crud_lifecycle(client: TestClient) -> None:
     task_id = submit_data["task_id"]
     assert submit_data["status"] == "PENDING"
 
-    # 3. Query the task immediately by ID
     get_resp = client.get(f"/tasks/{task_id}")
     assert get_resp.status_code == 200
     task_detail = get_resp.json()
@@ -38,7 +36,6 @@ def test_task_query_crud_lifecycle(client: TestClient) -> None:
     assert task_detail["metadata"] == {"env": "test"}
     assert task_detail["created_at"] is not None
 
-    # 4. List tasks and verify presence
     list_resp = client.get("/tasks")
     assert list_resp.status_code == 200
     tasks_list = list_resp.json()
@@ -47,7 +44,7 @@ def test_task_query_crud_lifecycle(client: TestClient) -> None:
 
 
 def test_task_queries_with_worker_execution() -> None:
-    # Override reasoning loop to execute with mock client
+
     mock_llm = MockLLMClient(
         responses=[
             {
@@ -70,7 +67,6 @@ def test_task_queries_with_worker_execution() -> None:
         assert submit_resp.status_code == 202
         task_id = submit_resp.json()["task_id"]
 
-        # Poll until completed (worker processes asynchronously)
         completed_task = None
         for _ in range(50):
             resp = test_client.get(f"/tasks/{task_id}")
@@ -87,19 +83,16 @@ def test_task_queries_with_worker_execution() -> None:
         assert completed_task["started_at"] is not None
         assert completed_task["completed_at"] is not None
 
-        # Query with status filter
         completed_list_resp = test_client.get("/tasks?status=COMPLETED")
         assert completed_list_resp.status_code == 200
         completed_list = completed_list_resp.json()
         assert any(t["task_id"] == task_id for t in completed_list)
 
-        # Query with non-matching status filter
         pending_list_resp = test_client.get("/tasks?status=PENDING")
         assert pending_list_resp.status_code == 200
         pending_list = pending_list_resp.json()
         assert not any(t["task_id"] == task_id for t in pending_list)
 
-        # Pagination test
         paginated_resp = test_client.get("/tasks?limit=1&offset=0")
         assert paginated_resp.status_code == 200
         paginated_list = paginated_resp.json()
@@ -114,17 +107,14 @@ def test_queue_full_does_not_persist_rejected_task() -> None:
         patch("src.main.get_settings", return_value=settings),
         TestClient(app) as test_client,
     ):
-        # First task succeeds and fills the queue
         res1 = test_client.post("/tasks", json={"task": "Accepted task"})
         assert res1.status_code == 202
 
-        # Second task rejected with 503
         res2 = test_client.post(
             "/tasks", json={"task": "Rejected task without DB write"}
         )
         assert res2.status_code == 503
 
-        # List all tasks and ensure rejected task was not inserted
         tasks_resp = test_client.get("/tasks")
         assert tasks_resp.status_code == 200
         tasks = tasks_resp.json()
@@ -134,7 +124,7 @@ def test_queue_full_does_not_persist_rejected_task() -> None:
 
 def test_delete_task_and_clear_all(client: TestClient) -> None:
     """Verifies DELETE /tasks/{id} and DELETE /tasks endpoints."""
-    # 1. Create 2 tasks
+
     res1 = client.post("/tasks", json={"task": "Task to delete"})
     assert res1.status_code == 202
     t1 = res1.json()["task_id"]
@@ -144,25 +134,20 @@ def test_delete_task_and_clear_all(client: TestClient) -> None:
     t2 = res2.json()["task_id"]
     assert t2 is not None
 
-    # 2. Delete single task
     del_res = client.delete(f"/tasks/{t1}")
     assert del_res.status_code == 200
     assert del_res.json()["status"] == "deleted"
 
-    # Verify t1 is gone
     get_res = client.get(f"/tasks/{t1}")
     assert get_res.status_code == 404
 
-    # 3. Delete non-existent task returns 404
     del_404 = client.delete("/tasks/non-existent-uuid")
     assert del_404.status_code == 404
 
-    # 4. Clear all tasks
     clear_res = client.delete("/tasks")
     assert clear_res.status_code == 200
     assert clear_res.json()["status"] == "cleared"
 
-    # List tasks should be empty
     list_res = client.get("/tasks")
     assert list_res.status_code == 200
     assert len(list_res.json()) == 0

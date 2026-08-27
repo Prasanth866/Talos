@@ -218,10 +218,10 @@ def test_health_endpoint() -> None:
 def test_settings_llm_api_key_is_secret_str() -> None:
     """Verifies llm_api_key is SecretStr and masked in repr."""
     settings = Settings(llm_api_key=SecretStr("sk-test-secret-key-123"))
-    # SecretStr masks value in string representation
+
     assert "sk-test-secret-key-123" not in repr(settings)
     assert "sk-test-secret-key-123" not in str(settings.llm_api_key)
-    # Actual value accessible via get_secret_value()
+
     assert settings.llm_api_key.get_secret_value() == "sk-test-secret-key-123"
 
 
@@ -233,6 +233,5 @@ def test_settings_requires_api_key_in_production() -> None:
     with pytest.raises(ValueError, match="LLM_API_KEY is required"):
         Settings(environment=Environment.STAGING, llm_api_key=SecretStr(""))
 
-    # Development allows empty key (for MockLLMClient testing)
     settings = Settings(environment=Environment.DEVELOPMENT, llm_api_key=SecretStr(""))
     assert settings.llm_api_key.get_secret_value() == ""

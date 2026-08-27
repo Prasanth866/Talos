@@ -58,13 +58,12 @@ def parse_unified_diff(diff_str: str) -> list[FilePatch]:
     while i < len(lines):
         line = lines[i]
 
-        # Match header lines: --- a/path/to/file or --- /dev/null
         if line.startswith("--- "):
             old_file_raw = line[4:].strip()
-            # Expect next line to be +++ b/path/to/file
+
             if i + 1 < len(lines) and lines[i + 1].startswith("+++ "):
                 new_file_raw = lines[i + 1][4:].strip()
-                i += 1  # Skip +++ line
+                i += 1
 
                 is_new = "/dev/null" in old_file_raw
                 is_delete = "/dev/null" in new_file_raw
@@ -85,7 +84,6 @@ def parse_unified_diff(diff_str: str) -> list[FilePatch]:
             i += 1
             continue
 
-        # Match hunk header: @@ -old_start,old_count +new_start,new_count @@
         hunk_match = re.match(
             r"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@", line
         )
@@ -114,14 +112,12 @@ def parse_unified_diff(diff_str: str) -> list[FilePatch]:
             i += 1
             continue
 
-        # Inside a hunk
         if current_hunk is not None:
             if line.startswith(("+", "-", " ")) or line == "":
                 current_hunk.lines.append(line if line else " ")
             elif line.startswith("\\ No newline at end of file"):
-                pass  # Skip EOF newline markers
+                pass
             else:
-                # Outside of hunk or garbage line
                 current_hunk = None
 
         i += 1
@@ -205,12 +201,11 @@ def apply_hunks_to_content(
                             f"Actual content:     '{orig_lines[orig_idx]}'"
                         ),
                     )
-                orig_idx += 1  # Skip removed line
+                orig_idx += 1
 
-            elif marker == "+":  # Addition line
+            elif marker == "+":
                 patched_lines.append(content)
 
-    # Append remaining lines
     while orig_idx < len(orig_lines):
         patched_lines.append(orig_lines[orig_idx])
         orig_idx += 1

@@ -16,7 +16,6 @@ def test_ast_chunking_produces_correct_units() -> None:
     chunks = chunker.chunk_file(calculator_path)
     assert len(chunks) >= 3
 
-    # Check top-level add function chunk
     add_chunks = [c for c in chunks if c.symbol_name == "add"]
     assert len(add_chunks) == 1
     add_chunk = add_chunks[0]
@@ -27,14 +26,12 @@ def test_ast_chunking_produces_correct_units() -> None:
     assert "File: calculator.py" in add_chunk.embedding_text
     assert add_chunk.token_count > 0
 
-    # Check Calculator class chunk
     class_chunks = [c for c in chunks if c.symbol_name == "Calculator"]
     assert len(class_chunks) == 1
     calc_chunk = class_chunks[0]
     assert calc_chunk.kind == SymbolKind.CLASS
     assert calc_chunk.docstring == "A standard arithmetic calculator class."
 
-    # Check member method chunk
     method_chunks = [c for c in chunks if c.symbol_name == "Calculator.multiply"]
     assert len(method_chunks) == 1
     mult_chunk = method_chunks[0]

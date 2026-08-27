@@ -123,7 +123,6 @@ async def test_live_command_execution_10mb_output_capping(
     workspace = manager.create(repo_url=f"file://{source_repo_dir}")
 
     try:
-        # Command generating ~17MB of output (200,000 lines of ~88 bytes)
         gen_cmd = (
             'python3 -u -c "for i in range(200000): '
             "print(f'line {i:06d}: ' + 'X' * 80)\""
@@ -140,7 +139,6 @@ async def test_live_command_execution_10mb_output_capping(
             lines.append(line)
         duration = time.perf_counter() - start_time
 
-        # Calculate approximate memory consumed by lines list
         total_chars = sum(len(line.line) for line in lines)
         memory_bytes = sys.getsizeof(lines) + sum(
             sys.getsizeof(line) + sys.getsizeof(line.line) for line in lines
@@ -166,7 +164,6 @@ async def test_live_command_execution_10mb_output_capping(
         assert lines[-1].sentinel_type == SentinelType.TRUNCATED
         assert lines[-1].line == "[TRUNCATED]"
 
-        # Ensure container is still responsive and not frozen
         ping_res = manager.run_command(workspace.workspace_id, "echo 'healthy'")
         assert ping_res["stdout"] == "healthy"
 
@@ -227,7 +224,6 @@ async def test_live_command_execution_timeout_enforcement(
         assert lines[0].line == "[TIMEOUT]"
         assert 4.9 <= elapsed_duration <= 7.0
 
-        # Verify no sleep processes linger in container
         ps_res = manager.run_command(
             workspace.workspace_id,
             ["/bin/sh", "-c", "ps aux 2>/dev/null || ls /proc"],
@@ -263,12 +259,10 @@ def test_live_container_hardening_experiments(
     workspace = manager.create(repo_url=f"file://{source_repo_dir}")
 
     try:
-        # 1. Non-Root Execution
         whoami_res = manager.run_command(workspace.workspace_id, "id")
         print(f"\n[HARDENING EXPERIMENT] User identity: {whoami_res['stdout']}")
         assert "uid=1000" in str(whoami_res["stdout"])
 
-        # 2. Read-Only Root Filesystem (write to / blocked)
         ro_res = manager.run_command(
             workspace.workspace_id,
             ["/bin/sh", "-c", "touch /root_test 2>&1 || true"],
@@ -276,7 +270,6 @@ def test_live_container_hardening_experiments(
         print(f"[HARDENING EXPERIMENT] Root fs write attempt: {ro_res['stdout']}")
         assert "Read-only file system" in str(ro_res["stdout"])
 
-        # 3. Writable /workspace
         ws_write_res = manager.run_command(
             workspace.workspace_id,
             [
@@ -288,7 +281,6 @@ def test_live_container_hardening_experiments(
         print(f"[HARDENING EXPERIMENT] /workspace write: {ws_write_res['stdout']}")
         assert ws_write_res["stdout"] == "sandbox_ok"
 
-        # 4. Writable /tmp (tmpfs)
         tmp_write_res = manager.run_command(
             workspace.workspace_id,
             ["/bin/sh", "-c", "echo 'tmp_ok' > /tmp/test.txt && cat /tmp/test.txt"],
@@ -296,7 +288,6 @@ def test_live_container_hardening_experiments(
         print(f"[HARDENING EXPERIMENT] /tmp tmpfs write: {tmp_write_res['stdout']}")
         assert tmp_write_res["stdout"] == "tmp_ok"
 
-        # 5. Network Isolation (network_mode: none)
         net_cmd = (
             'python3 -c "import urllib.request; '
             "urllib.request.urlopen('http://1.1.1.1', timeout=1)\" 2>&1 || true"
@@ -316,7 +307,6 @@ def test_live_container_hardening_experiments(
             or "errno 101" in str(net_res["stdout"]).lower()
         )
 
-        # 6. Memory Limit (512MB limit vs 1GB allocation attempt)
         mem_cmd = "python3 -c \"a = b'x' * (1024 * 1024 * 1024)\" 2>&1 || true"
         mem_res = manager.run_command(
             workspace.workspace_id,
@@ -332,7 +322,6 @@ def test_live_container_hardening_experiments(
             or str(mem_res["stdout"]) == ""
         )
 
-        # 7. PIDs Limit (pids_limit=256 vs fork bomb attempt)
         fork_cmd = 'python3 -c "import os; [os.fork() for _ in range(10)]" 2>&1 || true'
         fork_res = manager.run_command(
             workspace.workspace_id,

@@ -16,6 +16,7 @@ class EventType(StrEnum):
     TASK_COMPLETE = "task_complete"
     ERROR = "error"
     BUDGET_EXCEEDED = "budget_exceeded"
+    SECURITY_ALERT = "security_alert"
 
 
 class BaseEvent(BaseModel):
@@ -91,13 +92,24 @@ class BudgetExceededEvent(BaseEvent):
     step: int | None = None
 
 
+class SecurityEvent(BaseEvent):
+    """Emitted when a security threat (e.g. secret leak, dangerous cmd) is detected."""
+
+    event_type: Literal[EventType.SECURITY_ALERT] = EventType.SECURITY_ALERT
+    threat_type: str
+    threat_details: dict[str, Any] = Field(default_factory=dict)
+    redacted_count: int = 0
+    step: int | None = None
+
+
 AgentEvent = Annotated[
     ThoughtEvent
     | ToolCallEvent
     | ToolOutputEvent
     | TaskCompleteEvent
     | ErrorEvent
-    | BudgetExceededEvent,
+    | BudgetExceededEvent
+    | SecurityEvent,
     Field(discriminator="event_type"),
 ]
 

@@ -12,11 +12,10 @@ from src.agent.models import Message, MessageRole, TokenUsage
 
 
 def test_extract_json_payload_direct_and_markdown() -> None:
-    # Direct JSON
+
     direct = '{"thought": "test", "final_answer": "ok"}'
     assert extract_json_payload(direct) == {"thought": "test", "final_answer": "ok"}
 
-    # Markdown block
     markdown = (
         "```json\n"
         '{"thought": "test", "tool_call": {"tool_name": "foo", "arguments": {}}}\n'
@@ -24,7 +23,6 @@ def test_extract_json_payload_direct_and_markdown() -> None:
     )
     assert extract_json_payload(markdown)["thought"] == "test"
 
-    # Embedded in conversational text
     embedded = (
         "Here is the action:\n"
         '{"thought": "running", "final_answer": "done"}\n'
@@ -32,7 +30,6 @@ def test_extract_json_payload_direct_and_markdown() -> None:
     )
     assert extract_json_payload(embedded)["thought"] == "running"
 
-    # Invalid
     with pytest.raises(ValueError, match="Failed to parse valid JSON"):
         extract_json_payload("No json here whatsoever")
 
@@ -40,7 +37,6 @@ def test_extract_json_payload_direct_and_markdown() -> None:
 def test_parse_llm_response_content() -> None:
     token_usage = TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
 
-    # Valid tool call
     raw = (
         '{"thought": "searching", "tool_call": {"tool_name": "list_dir", '
         '"arguments": {"path": "."}}}'
@@ -54,14 +50,12 @@ def test_parse_llm_response_content() -> None:
     assert resp.token_usage.total_tokens == 15
     assert resp.latency_seconds == 0.12
 
-    # Valid final answer
     raw_final = '{"thought": "all done", "final_answer": "Success!"}'
     resp_final = parse_llm_response_content(raw_final, token_usage)
     assert resp_final.thought == "all done"
     assert resp_final.final_answer == "Success!"
     assert resp_final.tool_call is None
 
-    # Invalid unparseable content fallback
     raw_invalid = "Just casual text without JSON format"
     resp_invalid = parse_llm_response_content(raw_invalid, token_usage)
     assert resp_invalid.final_answer is None

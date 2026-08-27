@@ -22,7 +22,7 @@ async def db_session() -> AsyncGenerator[AsyncSession]:
 
 @pytest.mark.asyncio
 async def test_recover_interrupted_tasks(db_session: AsyncSession) -> None:
-    # Set up tasks in various states
+
     await repository.create_task(db_session, "t-pending", "Pending task")
 
     await repository.create_task(db_session, "t-running-1", "Running task 1")
@@ -35,11 +35,9 @@ async def test_recover_interrupted_tasks(db_session: AsyncSession) -> None:
     await repository.mark_running(db_session, "t-completed")
     await repository.mark_completed(db_session, "t-completed", result="All good")
 
-    # Run crash recovery
     recovered_count = await repository.recover_interrupted(db_session)
     assert recovered_count == 2
 
-    # Verify RUNNING tasks became FAILED
     t1 = await repository.get_task(db_session, "t-running-1")
     assert t1 is not None
     assert t1.status == TaskStatus.FAILED.value
@@ -50,7 +48,6 @@ async def test_recover_interrupted_tasks(db_session: AsyncSession) -> None:
     assert t2 is not None
     assert t2.status == TaskStatus.FAILED.value
 
-    # Verify PENDING and COMPLETED tasks remain untouched
     tp = await repository.get_task(db_session, "t-pending")
     assert tp is not None
     assert tp.status == TaskStatus.PENDING.value
@@ -60,6 +57,5 @@ async def test_recover_interrupted_tasks(db_session: AsyncSession) -> None:
     assert tc.status == TaskStatus.COMPLETED.value
     assert tc.result == "All good"
 
-    # Subsequent recovery runs should return 0
     second_run = await repository.recover_interrupted(db_session)
     assert second_run == 0

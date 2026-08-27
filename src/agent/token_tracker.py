@@ -9,7 +9,6 @@ from src.agent.models import CostRates, TokenUsage
 logger = structlog.get_logger(__name__)
 
 MODEL_PRICING: dict[str, CostRates] = {
-    # Groq / Open Source
     "llama-3.3-70b-versatile": CostRates(
         prompt_cost_per_1m=0.59, completion_cost_per_1m=0.79
     ),
@@ -20,22 +19,18 @@ MODEL_PRICING: dict[str, CostRates] = {
         prompt_cost_per_1m=0.15, completion_cost_per_1m=0.60
     ),
     "gpt-oss-120b": CostRates(prompt_cost_per_1m=0.15, completion_cost_per_1m=0.60),
-    # OpenAI
     "gpt-4o": CostRates(prompt_cost_per_1m=2.50, completion_cost_per_1m=10.00),
     "gpt-4o-mini": CostRates(prompt_cost_per_1m=0.15, completion_cost_per_1m=0.60),
     "gpt-4-turbo": CostRates(prompt_cost_per_1m=10.00, completion_cost_per_1m=30.00),
-    # Anthropic
     "claude-3-5-sonnet": CostRates(
         prompt_cost_per_1m=3.00, completion_cost_per_1m=15.00
     ),
     "claude-3-5-haiku": CostRates(prompt_cost_per_1m=0.80, completion_cost_per_1m=4.00),
-    # Google
     "gemini-1.5-pro": CostRates(prompt_cost_per_1m=1.25, completion_cost_per_1m=5.00),
     "gemini-1.5-flash": CostRates(
         prompt_cost_per_1m=0.075, completion_cost_per_1m=0.30
     ),
     "gemini-2.0-flash": CostRates(prompt_cost_per_1m=0.10, completion_cost_per_1m=0.40),
-    # DeepSeek
     "deepseek-chat": CostRates(prompt_cost_per_1m=0.14, completion_cost_per_1m=0.28),
 }
 
@@ -208,7 +203,7 @@ def format_partial_result(
 
     if tool_history:
         sections.append(f"\nTool Interactions Executed ({len(tool_history)}):")
-        for rec in tool_history[-5:]:  # show up to last 5
+        for rec in tool_history[-5:]:
             tool_name = getattr(rec, "tool_name", "tool")
             step = getattr(rec, "step", "?")
             success = getattr(rec, "success", True)

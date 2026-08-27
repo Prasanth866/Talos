@@ -14,7 +14,6 @@ def test_get_symbol_definition_returns_correct_result() -> None:
 
     indexer.index_file(calculator_path)
 
-    # 1. Lookup function definition
     results = indexer.get_symbol_definition("add")
     assert len(results) == 1
     add_sym = results[0]
@@ -23,7 +22,6 @@ def test_get_symbol_definition_returns_correct_result() -> None:
     assert add_sym.docstring == "Adds two integers together."
     assert "def add(a: int, b: int = 0) -> int" in add_sym.signature
 
-    # 2. Lookup class definition
     class_results = indexer.get_symbol_definition("Calculator")
     assert len(class_results) == 1
     calc_sym = class_results[0]
@@ -31,7 +29,6 @@ def test_get_symbol_definition_returns_correct_result() -> None:
     assert calc_sym.kind == SymbolKind.CLASS
     assert calc_sym.docstring == "A standard arithmetic calculator class."
 
-    # 3. Lookup method definition
     method_results = indexer.get_symbol_definition("multiply")
     assert len(method_results) == 1
     method_sym = method_results[0]
@@ -71,7 +68,6 @@ def test_index_directory_and_search_symbols() -> None:
     indexed_count = indexer.index_directory(fixture_dir)
     assert indexed_count >= 3
 
-    # Search for all "calc" or "fetch" symbols
     fetch_matches = indexer.search_symbols("fetch")
     assert len(fetch_matches) >= 1
     assert any(s.name == "async_fetch_data" for s in fetch_matches)
@@ -80,7 +76,6 @@ def test_index_directory_and_search_symbols() -> None:
     assert len(calc_matches) >= 1
     assert any(s.name.startswith("Calculator") for s in calc_matches)
 
-    # Verify broken_syntax file was indexed and recovered valid symbols
     broken_matches = indexer.search_symbols("valid_function")
     assert len(broken_matches) == 2
     names = [s.name for s in broken_matches]
@@ -109,11 +104,9 @@ def test_live_project_indexing_experiment() -> None:
         f"{(index_duration / max(1, file_count)) * 1000:.2f}ms"
     )
 
-    # 1. Performance check: 15+ files should index in < 1.0 second
     assert file_count >= 15
     assert index_duration < 2.0
 
-    # 2. Query WorkspaceManager class
     ws_symbols = indexer.get_symbol_definition("WorkspaceManager")
     assert len(ws_symbols) >= 1
     ws_sym = ws_symbols[0]
@@ -121,21 +114,18 @@ def test_live_project_indexing_experiment() -> None:
     assert "WorkspaceManager" in ws_sym.name
     assert "class WorkspaceManager" in ws_sym.signature
 
-    # 3. Query specific method execute_command
     exec_symbols = indexer.get_symbol_definition("execute_command")
     assert len(exec_symbols) >= 1
     exec_sym = exec_symbols[0]
     assert "execute_command" in exec_sym.name
     assert "workspace_id" in exec_sym.signature
 
-    # 4. Query create_default_dispatcher function
     disp_symbols = indexer.get_symbol_definition("create_default_dispatcher")
     assert len(disp_symbols) >= 1
     disp_sym = disp_symbols[0]
     assert disp_sym.kind == SymbolKind.FUNCTION
     assert "create_default_dispatcher" in disp_sym.name
 
-    # 5. Verify file structure overview of src/workspace/manager.py
     mgr_path = Path("src/workspace/manager.py")
     structure = indexer.list_file_structure(mgr_path)
     assert len(structure.imports) > 5

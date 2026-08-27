@@ -17,13 +17,12 @@ def test_is_transient_error() -> None:
     assert is_transient_error(RuntimeError("Rate limit exceeded")) is True
     assert is_transient_error(RuntimeError("503 Service Unavailable")) is True
 
-    # Non-retryable
     assert is_transient_error(NonRetryableError("Fatal")) is False
     assert is_transient_error(ValueError("Invalid argument")) is False
 
 
 def test_compute_backoff_delay() -> None:
-    # Without jitter: deterministic exponential growth
+
     d0 = compute_backoff_delay(0, initial_delay=1.0, backoff_factor=2.0, jitter=False)
     assert d0 == 1.0
     d1 = compute_backoff_delay(1, initial_delay=1.0, backoff_factor=2.0, jitter=False)
@@ -31,11 +30,9 @@ def test_compute_backoff_delay() -> None:
     d2 = compute_backoff_delay(2, initial_delay=1.0, backoff_factor=2.0, jitter=False)
     assert d2 == 4.0
 
-    # With full-jitter: uniformly random in [0, delay]
     dj = compute_backoff_delay(1, initial_delay=1.0, backoff_factor=2.0, jitter=True)
     assert 0.0 <= dj <= 2.0
 
-    # max_delay cap is respected
     d_capped = compute_backoff_delay(
         10, initial_delay=1.0, backoff_factor=2.0, max_delay=5.0, jitter=False
     )
@@ -46,14 +43,13 @@ def test_compute_backoff_delay() -> None:
 async def test_retry_async_succeeds_on_transient_error() -> None:
     """Retries on transient errors and returns the result of the first success."""
     mock_func = AsyncMock()
-    # Fails twice with transient errors, succeeds on 3rd attempt
+
     mock_func.side_effect = [
         ConnectionError("Network glitch"),
         TimeoutError("Request timed out"),
         "success_result",
     ]
 
-    # Patch tenacity's internal async sleep to avoid real delays in tests
     with patch("tenacity.nap.sleep", new_callable=AsyncMock):
         result = await retry_async(
             mock_func,
@@ -76,7 +72,6 @@ async def test_retry_async_aborts_on_non_transient_error() -> None:
     with pytest.raises(ValueError, match="Invalid prompt"):
         await retry_async(mock_func, max_retries=3)
 
-    # No retries — aborted after the first attempt
     assert mock_func.call_count == 1
 
 
@@ -92,7 +87,7 @@ async def test_retry_async_exceeds_max_retries() -> None:
     ):
         await retry_async(mock_func, max_retries=2, initial_delay=0.01)
 
-    assert mock_func.call_count == 3  # 1 initial + 2 retries
+    assert mock_func.call_count == 3
 
 
 def test_retry_sync_success_and_failure() -> None:
@@ -129,7 +124,6 @@ def test_retry_async_custom_retry_condition() -> None:
     with pytest.raises(RuntimeError, match="Not retried"):
         retry_sync(mock_func, max_retries=3, retry_condition=only_value_errors)
 
-    # RuntimeError does not satisfy the predicate — only one call
     assert mock_func.call_count == 1
 
 
@@ -151,7 +145,6 @@ def test_is_transient_error_http_status_codes() -> None:
             super().__init__("Non int status error")
             self.status_code = status_code
 
-    # Non-integer status_code falls through without TypeError
     assert is_transient_error(NonIntStatusError("invalid")) is False
     assert is_transient_error(NonIntStatusError(None)) is False
 
@@ -160,7 +153,6 @@ def test_retry_parameter_validation() -> None:
     """Verifies that invalid configuration parameters raise ValueError."""
     dummy = MagicMock()
 
-    # retry_sync / retry_async validation
     with pytest.raises(ValueError, match="max_retries must be >= 0"):
         retry_sync(dummy, max_retries=-1)
 
@@ -173,7 +165,6 @@ def test_retry_parameter_validation() -> None:
     with pytest.raises(ValueError, match="max_delay must be >= 0"):
         retry_sync(dummy, max_delay=-1.0)
 
-    # compute_backoff_delay validation
     with pytest.raises(ValueError, match="attempt must be >= 0"):
         compute_backoff_delay(attempt=-1)
 

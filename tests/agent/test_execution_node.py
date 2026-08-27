@@ -98,7 +98,6 @@ async def test_invalid_args_rejected_with_schema_validation_error() -> None:
         },
     )
 
-    # 1. Test missing required field "mode"
     tool_call_missing = ToolCall(
         tool_name="strict_tool",
         arguments={"filename": "doc.txt"},
@@ -109,7 +108,6 @@ async def test_invalid_args_rejected_with_schema_validation_error() -> None:
     assert "mode" in (res1.error or "")
     assert len(handler_executed) == 0
 
-    # 2. Test wrong enum value for "mode"
     tool_call_enum = ToolCall(
         tool_name="strict_tool",
         arguments={"filename": "doc.txt", "mode": "delete"},
@@ -120,7 +118,6 @@ async def test_invalid_args_rejected_with_schema_validation_error() -> None:
     assert "delete" in (res2.error or "")
     assert len(handler_executed) == 0
 
-    # 3. Test wrong type (integer instead of string for filename)
     tool_call_type = ToolCall(
         tool_name="strict_tool",
         arguments={"filename": 12345, "mode": "read"},
@@ -189,7 +186,6 @@ def test_execution_errors_produce_typed_tool_error_in_state() -> None:
     assert record.tool_name == "failing_tool"
     assert "Command 'invalid_cmd' failed" in record.output
 
-    # Check last_error populated with typed error
     last_err = state["last_error"]
     assert last_err is not None
     assert last_err["tool_name"] == "failing_tool"

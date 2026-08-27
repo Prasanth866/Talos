@@ -189,3 +189,54 @@ class BudgetExceededError(ToolError):
         self.budget_type = budget_type
         self.tokens_used = tokens_used
         self.cost_usd = cost_usd
+
+
+class DangerousCommandError(ToolError):
+    """Raised when a command matches dangerous shell execution safety patterns."""
+
+    def __init__(
+        self,
+        message: str = "Command matches a denied safety pattern.",
+        *,
+        tool_name: str = "ShellTool",
+        command: str = "",
+        blocked_pattern: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        merged_details = {
+            "command": command,
+            "blocked_pattern": blocked_pattern,
+            **(details or {}),
+        }
+        super().__init__(
+            message,
+            tool_name=tool_name,
+            code="DANGEROUS_COMMAND",
+            details=merged_details,
+        )
+        self.command = command
+        self.blocked_pattern = blocked_pattern
+
+
+class SecurityViolationError(ToolError):
+    """Raised when an operation violates security policy or contains threats."""
+
+    def __init__(
+        self,
+        message: str = "Security policy violation detected.",
+        *,
+        tool_name: str = "SecurityGuard",
+        threat_type: str = "general_threat",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        merged_details = {
+            "threat_type": threat_type,
+            **(details or {}),
+        }
+        super().__init__(
+            message,
+            tool_name=tool_name,
+            code="SECURITY_VIOLATION",
+            details=merged_details,
+        )
+        self.threat_type = threat_type

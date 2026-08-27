@@ -63,7 +63,6 @@ async def websocket_endpoint(
         while True:
             event = await subscriber_queue.get()
             if event is None:
-                # Task processing finished
                 logger.debug(
                     "websocket_task_stream_ended",
                     task_id=task_id,
